@@ -25,6 +25,8 @@ export default function RadarMap() {
   const [playing, setPlaying] = useState(true);
   const [mapReady, setMapReady] = useState(false);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [touchMap, setTouchMap] = useState(false);
+  const [mapInteraction, setMapInteraction] = useState(false);
 
   useEffect(() => { frameIndexRef.current = frameIndex; }, [frameIndex]);
 
@@ -57,6 +59,9 @@ export default function RadarMap() {
       const L = module.default;
       leafletRef.current = L;
       const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(LOCAL_TARGET, 8);
+      const isTouch = window.matchMedia("(pointer: coarse)").matches;
+      if (isTouch) map.dragging.disable();
+      setTouchMap(isTouch);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
       L.circleMarker(LOCAL_TARGET, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d67", fillOpacity: 1 }).bindTooltip("Bridgeport", { direction: "top" }).addTo(map);
       L.circle(LOCAL_TARGET, { radius: 900, color: "#ff7185", weight: 1, fillColor: "#ff4d67", fillOpacity: 0.06, dashArray: "5 6" }).addTo(map);
@@ -70,6 +75,13 @@ export default function RadarMap() {
       mapRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !touchMap) return;
+    if (mapInteraction) map.dragging.enable();
+    else map.dragging.disable();
+  }, [mapInteraction, touchMap]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -111,7 +123,8 @@ export default function RadarMap() {
     <section className="radarSection" id="radar" aria-labelledby="radar-heading">
       <div className="sectionTitle radarHeading"><div><p className="kicker">LIVE OBSERVATIONS</p><h2 id="radar-heading">Bridgeport radar</h2></div><span className={`radarFreshness ${status}`}>{status === "ready" ? "NOAA LIVE" : status.toUpperCase()}</span></div>
       <div className="radarShell">
-        <div ref={containerRef} className="radarMap" aria-label="Interactive NOAA radar map centered on Bridgeport, Chicago" />
+        <div ref={containerRef} className={`radarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label="Interactive NOAA radar map centered on Bridgeport, Chicago" />
+        {touchMap && <button type="button" className="mapInteractionButton" onClick={() => setMapInteraction((value) => !value)}>{mapInteraction ? "Done" : "Move map"}</button>}
         <div className="radarReadout" aria-live="polite"><strong>{frameLabel(currentFrame?.observedAt)}</strong><span>{isNewest ? "Newest observation" : `${Math.max(0, frames.length - 1 - frameIndex)} frames before newest`}</span></div>
       </div>
       <div className="radarControls">
