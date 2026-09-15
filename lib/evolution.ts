@@ -4,206 +4,25 @@ import { getRadarPointReflectivity, type RadarFrame } from "./radar";
 export type StormTrend = "strengthening" | "steady" | "weakening" | "quiet" | "unknown";
 export type StormMotion = "approaching" | "movingAway" | "passingNearby" | "stationaryOrUnclear" | "unknown";
 export type BridgeportRelevance = "overhead" | "nearby" | "quiet" | "unknown";
-
-export type StormEvolution = {
-  trend: StormTrend;
-  motion: StormMotion;
-  relevance: BridgeportRelevance;
-  headline: string;
-  detail: string;
-  strongestSector: string | null;
-  strongestNearbyDbz: number | null;
-  strongestRadiusMiles: number | null;
-  bridgeportDbz: number | null;
-  previousBridgeportDbz: number | null;
-  sampledRadiusMiles: number;
-  comparisonMinutes: number | null;
-  estimatedArrivalMinutes: number | null;
-  estimatedArrivalWindowMinutes: [number, number] | null;
-  closestApproachMiles: number | null;
-};
-
-const INNER_RADIUS_MILES = 4;
-const OUTER_RADIUS_MILES = 8;
-const SAMPLE_RADIUS_MILES = OUTER_RADIUS_MILES;
-const DIRECTIONS = [
-  { label: "N", bearing: 0 },
-  { label: "NE", bearing: 45 },
-  { label: "E", bearing: 90 },
-  { label: "SE", bearing: 135 },
-  { label: "S", bearing: 180 },
-  { label: "SW", bearing: 225 },
-  { label: "W", bearing: 270 },
-  { label: "NW", bearing: 315 },
-] as const;
-
-function destinationPoint(lat: number, lon: number, bearingDeg: number, miles: number) {
-  const earthRadiusMiles = 3958.8;
-  const angularDistance = miles / earthRadiusMiles;
-  const bearing = (bearingDeg * Math.PI) / 180;
-  const lat1 = (lat * Math.PI) / 180;
-  const lon1 = (lon * Math.PI) / 180;
-  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(angularDistance) + Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearing));
-  const lon2 = lon1 + Math.atan2(Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(lat1), Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2));
-  return { lat: (lat2 * 180) / Math.PI, lon: (lon2 * 180) / Math.PI };
-}
-
-function previousFrame(frames: RadarFrame[], latest: RadarFrame): RadarFrame | null {
-  const target = latest.epochSeconds - 10 * 60;
-  let best: RadarFrame | null = null;
-  let bestDelta = Infinity;
-  for (const frame of frames) {
-    if (frame.epochSeconds >= latest.epochSeconds) continue;
-    const delta = Math.abs(frame.epochSeconds - target);
-    if (delta < bestDelta) {
-      best = frame;
-      bestDelta = delta;
-    }
-  }
-  return best;
-}
-
-function trendFromChange(latest: number | null, previous: number | null): StormTrend {
-  if (latest === null || previous === null) return "unknown";
-  if (latest < 20 && previous < 20) return "quiet";
-  const change = latest - previous;
-  if (change >= 5) return "strengthening";
-  if (change <= -5) return "weakening";
-  return "steady";
-}
-
-function motionFromRadialShift(currentInner: number | null, currentOuter: number | null, previousInner: number | null, previousOuter: number | null): StormMotion {
-  if ([currentInner, currentOuter, previousInner, previousOuter].some((value) => value === null)) return "unknown";
-  const ci = currentInner as number;
-  const co = currentOuter as number;
-  const pi = previousInner as number;
-  const po = previousOuter as number;
-  const currentSignificant = Math.max(ci, co) >= 30;
-  const previousSignificant = Math.max(pi, po) >= 30;
-  if (!currentSignificant && !previousSignificant) return "stationaryOrUnclear";
-
-  const innerChange = ci - pi;
-  const outerChange = co - po;
-  const inwardShift = innerChange >= 7 && ci >= 25 && innerChange >= outerChange + 5;
-  const outwardShift = outerChange >= 7 && co >= 25 && outerChange >= innerChange + 5;
-
-  if (inwardShift) return "approaching";
-  if (outwardShift) return "movingAway";
-  if (ci >= 30 || co >= 30) return "passingNearby";
-  return "stationaryOrUnclear";
-}
-
-function motionPhrase(motion: StormMotion) {
-  if (motion === "approaching") return "appears to be approaching Bridgeport";
-  if (motion === "movingAway") return "appears to be moving away from Bridgeport";
-  if (motion === "passingNearby") return "is passing nearby; approach is not confirmed";
-  if (motion === "stationaryOrUnclear") return "has no clear toward/away motion signal";
-  return "motion is uncertain";
-}
-
-function arrivalEstimate(
-  motion: StormMotion,
-  strongestRadiusMiles: number | null,
-  comparisonMinutes: number | null,
-): { estimatedArrivalMinutes: number | null; estimatedArrivalWindowMinutes: [number, number] | null; closestApproachMiles: number | null } {
-  if (strongestRadiusMiles === null) return { estimatedArrivalMinutes: null, estimatedArrivalWindowMinutes: null, closestApproachMiles: null };
-  if (motion === "approaching" && comparisonMinutes && comparisonMinutes > 0) {
-    const inferredRadialMph = ((OUTER_RADIUS_MILES - INNER_RADIUS_MILES) / comparisonMinutes) * 60;
-    if (inferredRadialMph >= 8 && inferredRadialMph <= 60) {
-      const estimate = Math.round((strongestRadiusMiles / inferredRadialMph) * 60);
-      const margin = Math.max(5, Math.round(estimate * 0.6));
-      return {
-        estimatedArrivalMinutes: estimate,
-        estimatedArrivalWindowMinutes: [Math.max(0, estimate - margin), estimate + margin],
-        closestApproachMiles: 0,
-      };
-    }
-  }
-  if (motion === "passingNearby") return { estimatedArrivalMinutes: null, estimatedArrivalWindowMinutes: null, closestApproachMiles: strongestRadiusMiles };
-  if (motion === "movingAway") return { estimatedArrivalMinutes: null, estimatedArrivalWindowMinutes: null, closestApproachMiles: strongestRadiusMiles };
-  return { estimatedArrivalMinutes: null, estimatedArrivalWindowMinutes: null, closestApproachMiles: null };
-}
-
-function arrivalPhrase(window: [number, number] | null, closestApproachMiles: number | null, motion: StormMotion) {
-  if (window) return `If the same inward motion persists, the core could reach Bridgeport in roughly ${window[0]}–${window[1]} minutes.`;
-  if (motion === "passingNearby" && closestApproachMiles !== null) return `The current radar signal suggests a closest approach around ${closestApproachMiles} miles from Bridgeport rather than a direct arrival.`;
-  if (motion === "movingAway" && closestApproachMiles !== null) return `The core is moving away; no Bridgeport arrival time is indicated. It is currently about ${closestApproachMiles} miles from the sampled centerline.`;
-  return "A reliable Bridgeport arrival or closest-approach time cannot be estimated from the current radar signal.";
-}
-
-export async function assessStormEvolution(lat: number, lon: number, frames: RadarFrame[], bridgeportDbz: number | null): Promise<StormEvolution> {
-  const latest = frames[frames.length - 1] ?? null;
-  if (!latest) {
-    return { trend: "unknown", motion: "unknown", relevance: "unknown", headline: "Storm evolution unavailable", detail: "Recent radar frames are unavailable.", strongestSector: null, strongestNearbyDbz: null, strongestRadiusMiles: null, bridgeportDbz, previousBridgeportDbz: null, sampledRadiusMiles: SAMPLE_RADIUS_MILES, comparisonMinutes: null, estimatedArrivalMinutes: null, estimatedArrivalWindowMinutes: null, closestApproachMiles: null };
-  }
-
-  const samples = await Promise.all(DIRECTIONS.flatMap((direction) => [INNER_RADIUS_MILES, OUTER_RADIUS_MILES].map(async (radiusMiles) => {
-    const point = destinationPoint(lat, lon, direction.bearing, radiusMiles);
-    const dbz = await getRadarPointReflectivity(point.lat, point.lon, latest.observedAt);
-    return { ...direction, ...point, radiusMiles, dbz };
-  })));
-
-  const valid = samples.filter((sample): sample is typeof sample & { dbz: number } => sample.dbz !== null && Number.isFinite(sample.dbz));
-  const strongest = valid.reduce<(typeof valid)[number] | null>((best, sample) => !best || sample.dbz > best.dbz ? sample : best, null);
-  const prior = previousFrame(frames, latest);
-  const sectorSamples = strongest ? samples.filter((sample) => sample.label === strongest.label) : [];
-  const currentInner = sectorSamples.find((sample) => sample.radiusMiles === INNER_RADIUS_MILES)?.dbz ?? null;
-  const currentOuter = sectorSamples.find((sample) => sample.radiusMiles === OUTER_RADIUS_MILES)?.dbz ?? null;
-
-  const [previousInner, previousOuter, previousBridgeportDbz] = prior && strongest
-    ? await Promise.all([
-        getRadarPointReflectivity(destinationPoint(lat, lon, strongest.bearing, INNER_RADIUS_MILES).lat, destinationPoint(lat, lon, strongest.bearing, INNER_RADIUS_MILES).lon, prior.observedAt),
-        getRadarPointReflectivity(destinationPoint(lat, lon, strongest.bearing, OUTER_RADIUS_MILES).lat, destinationPoint(lat, lon, strongest.bearing, OUTER_RADIUS_MILES).lon, prior.observedAt),
-        getRadarPointReflectivity(lat, lon, prior.observedAt),
-      ])
-    : [null, null, prior ? await getRadarPointReflectivity(lat, lon, prior.observedAt) : null];
-
-  const strongestNearbyDbz = strongest?.dbz ?? null;
-  const previousStrongestDbz = strongest?.radiusMiles === INNER_RADIUS_MILES ? previousInner : previousOuter;
-  const nearbyTrend = trendFromChange(strongestNearbyDbz, previousStrongestDbz);
-  const localTrend = trendFromChange(bridgeportDbz, previousBridgeportDbz);
-  const trend = bridgeportDbz !== null && bridgeportDbz >= 20 ? localTrend : nearbyTrend;
-  const motion = strongest && prior ? motionFromRadialShift(currentInner, currentOuter, previousInner, previousOuter) : "unknown";
-  const comparisonMinutes = prior ? Math.round((latest.epochSeconds - prior.epochSeconds) / 60) : null;
-  const estimate = arrivalEstimate(motion, strongest?.radiusMiles ?? null, comparisonMinutes);
-
-  let relevance: BridgeportRelevance = "quiet";
-  let headline = "No significant storm core near Bridgeport";
-  let detail = "Radar sampling shows no significant echo over Bridgeport or on the nearby 4- and 8-mile rings.";
-
-  if (bridgeportDbz === null && strongestNearbyDbz === null) {
-    relevance = "unknown";
-    headline = "Bridgeport radar relevance unavailable";
-    detail = "Radar point sampling is unavailable right now.";
-  } else if ((bridgeportDbz ?? 0) >= 35) {
-    relevance = "overhead";
-    headline = `Strong echo over Bridgeport · ${trend}`;
-    detail = `Reflectivity at Bridgeport is ${bridgeportDbz?.toFixed(0)} dBZ. Recent radar samples suggest the local echo is ${trend}.`;
-  } else if ((strongestNearbyDbz ?? 0) >= 30 && strongest) {
-    relevance = "nearby";
-    const motionLabel = motion === "approaching" ? "approaching" : motion === "movingAway" ? "moving away" : "nearby";
-    headline = `Storm core ${strongest.label} of Bridgeport · ${motionLabel}`;
-    detail = `The strongest sampled echo is about ${strongest.radiusMiles} miles ${strongest.label} of Bridgeport at ${strongestNearbyDbz?.toFixed(0)} dBZ. Its intensity is ${trend}, and the 4-/8-mile ring changes ${motionPhrase(motion)}. ${arrivalPhrase(estimate.estimatedArrivalWindowMinutes, estimate.closestApproachMiles, motion)} This is a coarse MRMS radial estimate, not a storm-track forecast.`;
-  } else if (trend === "strengthening" || trend === "weakening") {
-    headline = `Nearby echoes are ${trend}`;
-    detail = `Nearby radar samples are ${trend}, but no significant core is currently over or immediately near Bridgeport.`;
-  }
-
-  return {
-    trend,
-    motion,
-    relevance,
-    headline,
-    detail,
-    strongestSector: strongest?.label ?? null,
-    strongestNearbyDbz,
-    strongestRadiusMiles: strongest?.radiusMiles ?? null,
-    bridgeportDbz,
-    previousBridgeportDbz,
-    sampledRadiusMiles: SAMPLE_RADIUS_MILES,
-    comparisonMinutes,
-    estimatedArrivalMinutes: estimate.estimatedArrivalMinutes,
-    estimatedArrivalWindowMinutes: estimate.estimatedArrivalWindowMinutes,
-    closestApproachMiles: estimate.closestApproachMiles,
-  };
+export type StormEvolution = { trend:StormTrend; motion:StormMotion; relevance:BridgeportRelevance; headline:string; detail:string; strongestSector:string|null; strongestNearbyDbz:number|null; strongestRadiusMiles:number|null; bridgeportDbz:number|null; previousBridgeportDbz:number|null; sampledRadiusMiles:number; comparisonMinutes:number|null; estimatedArrivalMinutes:number|null; estimatedArrivalWindowMinutes:[number,number]|null; closestApproachMiles:number|null };
+const INNER_RADIUS_MILES=4, OUTER_RADIUS_MILES=8, SAMPLE_RADIUS_MILES=8;
+const DIRECTIONS=[{label:"N",bearing:0},{label:"NE",bearing:45},{label:"E",bearing:90},{label:"SE",bearing:135},{label:"S",bearing:180},{label:"SW",bearing:225},{label:"W",bearing:270},{label:"NW",bearing:315}] as const;
+function destinationPoint(lat:number,lon:number,bearingDeg:number,miles:number){const r=3958.8,a=miles/r,b=bearingDeg*Math.PI/180,lat1=lat*Math.PI/180,lon1=lon*Math.PI/180;const lat2=Math.asin(Math.sin(lat1)*Math.cos(a)+Math.cos(lat1)*Math.sin(a)*Math.cos(b));const lon2=lon1+Math.atan2(Math.sin(b)*Math.sin(a)*Math.cos(lat1),Math.cos(a)-Math.sin(lat1)*Math.sin(lat2));return{lat:lat2*180/Math.PI,lon:lon2*180/Math.PI}}
+function previousFrame(frames:RadarFrame[],latest:RadarFrame){const target=latest.epochSeconds-600;let best:RadarFrame|null=null,bestDelta=Infinity;for(const frame of frames){if(frame.epochSeconds>=latest.epochSeconds)continue;const delta=Math.abs(frame.epochSeconds-target);if(delta<bestDelta){best=frame;bestDelta=delta}}return best}
+function trendFromChange(latest:number|null,previous:number|null):StormTrend{if(latest===null||previous===null)return"unknown";if(latest<20&&previous<20)return"quiet";const change=latest-previous;if(change>=5)return"strengthening";if(change<=-5)return"weakening";return"steady"}
+function motionFromRadialShift(ci0:number|null,co0:number|null,pi0:number|null,po0:number|null):StormMotion{if([ci0,co0,pi0,po0].some(v=>v===null))return"unknown";const ci=ci0 as number,co=co0 as number,pi=pi0 as number,po=po0 as number;if(Math.max(ci,co)<30&&Math.max(pi,po)<30)return"stationaryOrUnclear";const innerChange=ci-pi,outerChange=co-po;if(innerChange>=7&&ci>=25&&innerChange>=outerChange+5)return"approaching";if(outerChange>=7&&co>=25&&outerChange>=innerChange+5)return"movingAway";if(ci>=30||co>=30)return"passingNearby";return"stationaryOrUnclear"}
+function arrivalEstimate(motion:StormMotion,radius:number|null,minutes:number|null){if(radius===null)return{estimatedArrivalMinutes:null,estimatedArrivalWindowMinutes:null as [number,number]|null,closestApproachMiles:null};if(motion==="approaching"&&minutes&&minutes>0){const mph=((OUTER_RADIUS_MILES-INNER_RADIUS_MILES)/minutes)*60;if(mph>=8&&mph<=60){const estimate=Math.round(radius/mph*60),margin=Math.max(5,Math.round(estimate*.6));return{estimatedArrivalMinutes:estimate,estimatedArrivalWindowMinutes:[Math.max(0,estimate-margin),estimate+margin] as [number,number],closestApproachMiles:0}}}if(motion==="passingNearby"||motion==="movingAway")return{estimatedArrivalMinutes:null,estimatedArrivalWindowMinutes:null as [number,number]|null,closestApproachMiles:radius};return{estimatedArrivalMinutes:null,estimatedArrivalWindowMinutes:null as [number,number]|null,closestApproachMiles:null}}
+function directionWords(label:string){return({N:"north",NE:"northeast",E:"east",SE:"southeast",S:"south",SW:"southwest",W:"west",NW:"northwest"} as Record<string,string>)[label]??label}
+export async function assessStormEvolution(lat:number,lon:number,frames:RadarFrame[],bridgeportDbz:number|null):Promise<StormEvolution>{
+ const latest=frames[frames.length-1]??null;if(!latest)return{trend:"unknown",motion:"unknown",relevance:"unknown",headline:"Storm information unavailable",detail:"Recent radar information is unavailable.",strongestSector:null,strongestNearbyDbz:null,strongestRadiusMiles:null,bridgeportDbz,previousBridgeportDbz:null,sampledRadiusMiles:SAMPLE_RADIUS_MILES,comparisonMinutes:null,estimatedArrivalMinutes:null,estimatedArrivalWindowMinutes:null,closestApproachMiles:null};
+ const samples=await Promise.all(DIRECTIONS.flatMap(direction=>[INNER_RADIUS_MILES,OUTER_RADIUS_MILES].map(async radiusMiles=>{const point=destinationPoint(lat,lon,direction.bearing,radiusMiles);const dbz=await getRadarPointReflectivity(point.lat,point.lon,latest.observedAt);return{...direction,...point,radiusMiles,dbz}})));
+ const valid=samples.filter((s):s is typeof s&{dbz:number}=>s.dbz!==null&&Number.isFinite(s.dbz));const strongest=valid.reduce<(typeof valid)[number]|null>((best,s)=>!best||s.dbz>best.dbz?s:best,null);const prior=previousFrame(frames,latest);const sector=strongest?samples.filter(s=>s.label===strongest.label):[];const currentInner=sector.find(s=>s.radiusMiles===INNER_RADIUS_MILES)?.dbz??null,currentOuter=sector.find(s=>s.radiusMiles===OUTER_RADIUS_MILES)?.dbz??null;
+ const [previousInner,previousOuter,previousBridgeportDbz]=prior&&strongest?await Promise.all([getRadarPointReflectivity(destinationPoint(lat,lon,strongest.bearing,INNER_RADIUS_MILES).lat,destinationPoint(lat,lon,strongest.bearing,INNER_RADIUS_MILES).lon,prior.observedAt),getRadarPointReflectivity(destinationPoint(lat,lon,strongest.bearing,OUTER_RADIUS_MILES).lat,destinationPoint(lat,lon,strongest.bearing,OUTER_RADIUS_MILES).lon,prior.observedAt),getRadarPointReflectivity(lat,lon,prior.observedAt)]):[null,null,prior?await getRadarPointReflectivity(lat,lon,prior.observedAt):null];
+ const strongestNearbyDbz=strongest?.dbz??null,previousStrongestDbz=strongest?.radiusMiles===INNER_RADIUS_MILES?previousInner:previousOuter,nearbyTrend=trendFromChange(strongestNearbyDbz,previousStrongestDbz),localTrend=trendFromChange(bridgeportDbz,previousBridgeportDbz),trend=bridgeportDbz!==null&&bridgeportDbz>=20?localTrend:nearbyTrend,motion=strongest&&prior?motionFromRadialShift(currentInner,currentOuter,previousInner,previousOuter):"unknown",comparisonMinutes=prior?Math.round((latest.epochSeconds-prior.epochSeconds)/60):null,estimate=arrivalEstimate(motion,strongest?.radiusMiles??null,comparisonMinutes);
+ let relevance:BridgeportRelevance="quiet",headline="No significant storm near Bridgeport",detail="No significant storm is currently over or near Bridgeport.";
+ if(bridgeportDbz===null&&strongestNearbyDbz===null){relevance="unknown";headline="Storm information unavailable";detail="Radar information is unavailable right now."}
+ else if((bridgeportDbz??0)>=35){relevance="overhead";headline="Storm over Bridgeport";detail=`A strong storm is over Bridgeport and is currently ${trend}.`}
+ else if((strongestNearbyDbz??0)>=30&&strongest){relevance="nearby";const where=directionWords(strongest.label);if(motion==="movingAway"){headline=`Storm ${where} of Bridgeport is moving away`;detail=`A strong storm is about ${strongest.radiusMiles} miles ${where} of Bridgeport and is moving away from our area.`}else if(motion==="approaching"){headline=`Storm ${where} of Bridgeport is approaching`;detail=estimate.estimatedArrivalWindowMinutes?`A strong storm is about ${strongest.radiusMiles} miles ${where} of Bridgeport and appears to be moving toward our area. If that movement continues, it could reach Bridgeport in roughly ${estimate.estimatedArrivalWindowMinutes[0]}–${estimate.estimatedArrivalWindowMinutes[1]} minutes.`:`A strong storm is about ${strongest.radiusMiles} miles ${where} of Bridgeport and appears to be moving toward our area.`}else if(motion==="passingNearby"){headline=`Storm ${where} of Bridgeport is passing nearby`;detail=`A strong storm is about ${strongest.radiusMiles} miles ${where} of Bridgeport. It is nearby, but current radar does not show a clear move toward Bridgeport.`}else{headline=`Storm ${where} of Bridgeport`;detail=`A strong storm is about ${strongest.radiusMiles} miles ${where} of Bridgeport. Its movement toward or away from our area is not clear yet.`}}
+ else if(trend==="strengthening"||trend==="weakening"){headline=`Nearby rain is ${trend}`;detail=`Nearby radar echoes are ${trend}, but no significant storm is currently over or immediately near Bridgeport.`}
+ return{trend,motion,relevance,headline,detail,strongestSector:strongest?.label??null,strongestNearbyDbz,strongestRadiusMiles:strongest?.radiusMiles??null,bridgeportDbz,previousBridgeportDbz,sampledRadiusMiles:SAMPLE_RADIUS_MILES,comparisonMinutes,estimatedArrivalMinutes:estimate.estimatedArrivalMinutes,estimatedArrivalWindowMinutes:estimate.estimatedArrivalWindowMinutes,closestApproachMiles:estimate.closestApproachMiles};
 }
