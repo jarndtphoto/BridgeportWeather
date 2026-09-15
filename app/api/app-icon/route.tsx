@@ -1,8 +1,5 @@
 export const runtime = "edge";
 
-const ICON_SOURCE =
-  "https://raw.githubusercontent.com/jarndtphoto/BridgeportWeather/main/Codex%20Image%20Sep%2015%2C%202026%2C%2003_23_04%20PM.png";
-
-export async function GET() {
-  return Response.redirect(ICON_SOURCE, 307);
+export async function GET(request: Request) {
+  return Response.redirect(new URL("/bsw-icon.png?v=4", request.url), 307);
 }
