@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./bright-theme.css";
+import "./layout-refresh.css";
 import "leaflet/dist/leaflet.css";
 import AppUpdateChecker from "./components/AppUpdateChecker";
 
