@@ -5,7 +5,8 @@ import type { Map as LeafletMap, TileLayer } from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
-const HRRR_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi";
+const HRRR_TMS_BASE = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0";
+const TRANSPARENT_TILE = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
 
 type MetaPayload = { modelInitUtc: string | null };
 
@@ -30,11 +31,19 @@ function runLabel(modelInitUtc: string | null) {
   }).format(new Date(modelInitUtc))}`;
 }
 
+function runKey(modelInitUtc: string | null) {
+  if (!modelInitUtc) return "0";
+  const date = new Date(modelInitUtc);
+  if (Number.isNaN(date.getTime())) return "0";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}`;
+}
+
 export default function ForecastRadar() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<typeof Leaflet | null>(null);
-  const layerRef = useRef<TileLayer.WMS | null>(null);
+  const layerRef = useRef<TileLayer | null>(null);
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [mapReady, setMapReady] = useState(false);
@@ -94,19 +103,34 @@ export default function ForecastRadar() {
     if (!map || !L || !mapReady) return;
 
     const frameMinutes = forecastMinutes[frameIndex];
-    const layerName = `refd_${String(frameMinutes).padStart(4, "0")}`;
+    const forecastKey = String(frameMinutes).padStart(4, "0");
+    const url = `${HRRR_TMS_BASE}/hrrr::REFD-F${forecastKey}-${runKey(modelInitUtc)}/{z}/{x}/{y}.png`;
     const previous = layerRef.current;
-    const next = L.tileLayer.wms(HRRR_WMS, {
-      layers: layerName,
-      format: "image/png",
-      transparent: true,
+    const next = L.tileLayer(url, {
       opacity: 0.72,
-      version: "1.1.1",
       zIndex: 400,
-    } as L.WMSOptions).addTo(map);
-    layerRef.current = next;
-    if (previous && map.hasLayer(previous)) map.removeLayer(previous);
-  }, [forecastMinutes, frameIndex, mapReady]);
+      maxZoom: 10,
+      errorTileUrl: TRANSPARENT_TILE,
+      attribution: "HRRR reflectivity via Iowa Environmental Mesonet",
+    }).addTo(map);
+
+    let replaced = false;
+    const replacePrevious = () => {
+      if (replaced) return;
+      replaced = true;
+      layerRef.current = next;
+      if (previous && map.hasLayer(previous)) map.removeLayer(previous);
+    };
+
+    next.once("load", replacePrevious);
+    const fallbackTimer = window.setTimeout(replacePrevious, 1800);
+
+    return () => {
+      window.clearTimeout(fallbackTimer);
+      next.off("load", replacePrevious);
+      if (layerRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
+    };
+  }, [forecastMinutes, frameIndex, mapReady, modelInitUtc]);
 
   useEffect(() => {
     if (!playing) return;
