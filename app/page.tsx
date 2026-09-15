@@ -1,6 +1,6 @@
 import { getAmbientSnapshot, type AmbientSnapshot, type RawObservation } from "../lib/ambient";
-import { getLocalForecast, type LocalForecast } from "../lib/forecast";
-import { getHrrrModelInitUtc, getHrrrPointSample, hrrrForecastMinutesForTime } from "../lib/hrrr";
+import { getLocalForecast, type LocalForecast, type HourlyForecastPeriod } from "../lib/forecast";
+import { getHrrrModelInitUtc, getHrrrPointSample, hrrrForecastMinutesForTime, type HrrrPointSample } from "../lib/hrrr";
 import RadarMap from "./components/RadarMap";
 import ForecastRadar from "./components/ForecastRadar";
 import ThreatBanner from "./components/ThreatBanner";
@@ -20,6 +20,17 @@ function observationMetrics(observation: RawObservation) { const windSpeed = num
 function observedTime(value:string|null){if(!value)return"Latest observation";const date=new Date(value);return Number.isNaN(date.getTime())?"Latest observation":`Observed ${date.toLocaleString("en-US",{timeZone:"America/Chicago",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZoneName:"short"})}`;}
 function forecastTime(value:string){const date=new Date(value);return Number.isNaN(date.getTime())?"—":date.toLocaleTimeString("en-US",{timeZone:"America/Chicago",hour:"numeric"});}
 function precipitationForecast(text:string){const value=text.toLowerCase();return value.includes("rain")||value.includes("shower")||value.includes("thunder")||value.includes("drizzle")||value.includes("sleet")||value.includes("snow")||value.includes("wintry")||value.includes("freezing");}
+function thunderForecast(text:string){const value=text.toLowerCase();return value.includes("thunder")||value.includes("storm");}
+function radarDrivenIcon(period:HourlyForecastPeriod,sample:HrrrPointSample|null){
+  const predicted=forecastIconKind(period.shortForecast,period.icon,period.precipitationChance);
+  const forecastSaysPrecip=precipitationForecast(period.shortForecast);
+  const cloudy=forecastIconKind("Mostly Cloudy",period.icon);
+  if(sample?.precipitation!==true||sample.intensity==="none") return forecastSaysPrecip?cloudy:predicted;
+  if(sample.intensity==="light") return forecastIconKind("Light Rain",period.icon,period.precipitationChance);
+  if(sample.intensity==="moderate") return forecastIconKind("Rain",period.icon,period.precipitationChance);
+  if(sample.intensity==="strong") return thunderForecast(period.shortForecast)?predicted:forecastIconKind("Heavy Rain",period.icon,period.precipitationChance);
+  return forecastSaysPrecip?cloudy:predicted;
+}
 
 export default async function Home(){
   let snapshot:AmbientSnapshot|null=null;
@@ -44,13 +55,7 @@ export default async function Home(){
   }));
 
   const currentPeriod=nextSix[0]??null;
-  const currentRadarPrecip=hourlyRadarSamples[0]?.precipitation===true;
-  const currentForecastSaysPrecip=currentPeriod?precipitationForecast(currentPeriod.shortForecast):false;
-  const currentIconKind=currentPeriod
-    ? (currentRadarPrecip
-        ? (currentForecastSaysPrecip?forecastIconKind(currentPeriod.shortForecast,currentPeriod.icon,currentPeriod.precipitationChance):forecastIconKind("Light Rain",currentPeriod.icon,currentPeriod.precipitationChance))
-        : (currentForecastSaysPrecip?forecastIconKind("Mostly Cloudy",currentPeriod.icon):forecastIconKind(currentPeriod.shortForecast,currentPeriod.icon,currentPeriod.precipitationChance)))
-    : forecastIconKind("Mostly Cloudy",null);
+  const currentIconKind=currentPeriod?radarDrivenIcon(currentPeriod,hourlyRadarSamples[0]??null):forecastIconKind("Mostly Cloudy",null);
 
   return <main>
     <input className="tabInput" type="radio" id="tab-radar" name="screen" defaultChecked/>
@@ -79,13 +84,7 @@ export default async function Home(){
       {nextSix.length ? <>
         <div className="forecastHours">
           {nextSix.map((period,index)=>{
-            const predictedKind=forecastIconKind(period.shortForecast,period.icon,period.precipitationChance);
-            const forecastSaysPrecip=precipitationForecast(period.shortForecast);
-            const radarPrecip=hourlyRadarSamples[index]?.precipitation===true;
-            const cloudyKind=forecastIconKind("Mostly Cloudy",period.icon);
-            const iconKind=radarPrecip
-              ? (forecastSaysPrecip?predictedKind:forecastIconKind("Light Rain",period.icon,period.precipitationChance))
-              : (forecastSaysPrecip?cloudyKind:predictedKind);
+            const iconKind=radarDrivenIcon(period,hourlyRadarSamples[index]??null);
             return <article className="forecastHour" key={period.startTime}>
               <span className="forecastHourTime">{forecastTime(period.startTime)}</span>
               <WeatherIcon className="forecastHourIcon" kind={iconKind}/>
