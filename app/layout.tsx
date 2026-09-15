@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import "./bright-theme.css";
 import "leaflet/dist/leaflet.css";
 
 export const metadata: Metadata = {
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0b1017",
+  themeColor: "#1d3a56",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
