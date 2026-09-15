@@ -75,6 +75,17 @@ export default function RadarMap() {
   }, []);
 
   useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect || rect.width < 100 || rect.height < 100) return;
+      window.requestAnimationFrame(() => mapRef.current?.invalidateSize(false));
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map || !touchMap) return;
     if (mapInteraction) map.dragging.enable();
