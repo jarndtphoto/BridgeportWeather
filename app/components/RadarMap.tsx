@@ -130,7 +130,7 @@ export default function RadarMap() {
       <div className="radarControls">
         <button type="button" onClick={() => setPlaying((value) => !value)} disabled={status !== "ready"} aria-label={playing ? "Pause radar animation" : "Play radar animation"}><span aria-hidden="true">{playing ? "Ⅱ" : "▶"}</span> {playing ? "Pause" : "Play"}</button>
         <input type="range" min="0" max={Math.max(0, frames.length - 1)} value={frameIndex} onChange={(event) => { setPlaying(false); setFrameIndex(Number(event.target.value)); }} disabled={!frames.length} aria-label="Radar observation timeline" />
-        <button type="button" className="newestButton" onClick={() => { setPlaying(false); setFrameIndex(Math.max(0, frames.length - 1)); }} disabled={!frames.length || isNewest}>Newest</button>
+        <button type="button" className="newestButton" onClick={() => { setPlaying(false); setFrameIndex(Math.max(0, frames.length - 1)); }} disabled={!frames.length || isNewest}>Current Radar</button>
       </div>
       {status === "error" && <p className="radarError">NOAA radar is temporarily unavailable. The app will retry automatically.</p>}
       <p className="radarSource">NOAA/NWS MRMS quality-controlled base reflectivity · actual observations · typically updates about every 2 minutes</p>
