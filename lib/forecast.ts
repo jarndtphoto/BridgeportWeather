@@ -12,6 +12,7 @@ export type HourlyForecastPeriod = {
   windSpeed: string;
   windDirection: string;
   shortForecast: string;
+  icon: string | null;
 };
 
 export type DailyForecastPeriod = {
@@ -47,6 +48,7 @@ type NwsPeriod = {
   windDirection?: string;
   shortForecast?: string;
   detailedForecast?: string;
+  icon?: string;
 };
 
 type ForecastPayload = {
@@ -83,6 +85,7 @@ function hourlyPeriod(period: NwsPeriod): HourlyForecastPeriod | null {
     windSpeed: period.windSpeed ?? "",
     windDirection: period.windDirection ?? "",
     shortForecast: period.shortForecast ?? "",
+    icon: period.icon ?? null,
   };
 }
 
