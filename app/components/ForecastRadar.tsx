@@ -89,12 +89,26 @@ export default function ForecastRadar() {
     const forecastKey = String(frameMinutes).padStart(4, "0");
     const url = `${HRRR_TMS_BASE}/hrrr::REFD-F${forecastKey}-${runKey(modelInitUtc)}/{z}/{x}/{y}.png`;
     const previous = layerRef.current;
-    const next = L.tileLayer(url, { opacity: 0.72, zIndex: 400, maxZoom: 10, errorTileUrl: TRANSPARENT_TILE, attribution: "HRRR reflectivity via Iowa Environmental Mesonet" }).addTo(map);
+    const next = L.tileLayer(url, {
+      opacity: 0.72,
+      zIndex: 400,
+      maxZoom: 10,
+      tms: true,
+      errorTileUrl: TRANSPARENT_TILE,
+      attribution: "HRRR reflectivity via Iowa Environmental Mesonet",
+    }).addTo(map);
     let replaced = false;
-    const replacePrevious = () => { if (replaced) return; replaced = true; layerRef.current = next; if (previous && map.hasLayer(previous)) map.removeLayer(previous); };
+    const replacePrevious = () => {
+      if (replaced) return;
+      replaced = true;
+      layerRef.current = next;
+      if (previous && map.hasLayer(previous)) map.removeLayer(previous);
+    };
     next.once("load", replacePrevious);
-    const fallbackTimer = window.setTimeout(replacePrevious, 1800);
-    return () => { window.clearTimeout(fallbackTimer); next.off("load", replacePrevious); if (layerRef.current !== next && map.hasLayer(next)) map.removeLayer(next); };
+    return () => {
+      next.off("load", replacePrevious);
+      if (layerRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
+    };
   }, [forecastMinutes, frameIndex, mapReady, modelInitUtc]);
 
   useEffect(() => {
