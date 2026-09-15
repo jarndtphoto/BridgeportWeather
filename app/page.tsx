@@ -30,7 +30,8 @@ export default async function Home(){
   if(forecastResult.status==="fulfilled") forecast=forecastResult.value;
 
   const metrics=snapshot?observationMetrics(snapshot.rawObservation):[{label:"Outdoor temperature",value:"Live data unavailable",detail:null},{label:"Wind",value:"Live data unavailable",detail:null},{label:"Rain",value:"Live data unavailable",detail:null},{label:"Solar",value:"Live data unavailable",detail:null}];
-  const nextSix = forecast?.hourly.slice(0,6) ?? [];
+  const now = Date.now();
+  const nextSix = forecast?.hourly.filter(period => Date.parse(period.startTime) + 3_600_000 > now).slice(0,6) ?? [];
   const later = forecast?.daily.slice(0,4) ?? [];
 
   return <main>
@@ -58,7 +59,7 @@ export default async function Home(){
         <div className="forecastHours">
           {nextSix.map(period=><article className="forecastHour" key={period.startTime}>
             <span className="forecastHourTime">{forecastTime(period.startTime)}</span>
-            <WeatherIcon className="forecastHourIcon" kind={forecastIconKind(period.shortForecast, period.icon)} />
+            <WeatherIcon className="forecastHourIcon" kind={forecastIconKind(period.shortForecast, period.icon, period.precipitationChance)} />
             <strong>{period.temperature}°</strong>
             <span>{period.shortForecast}</span>
             <small>{period.precipitationChance===null?"Rain chance —":`${period.precipitationChance}% rain`}</small>
