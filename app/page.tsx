@@ -1,6 +1,7 @@
 import { getAmbientSnapshot, type AmbientSnapshot, type RawObservation } from "../lib/ambient";
 import { getLocalForecast, type LocalForecast, type HourlyForecastPeriod } from "../lib/forecast";
 import { getHrrrModelInitUtc, getHrrrPointSample, hrrrForecastMinutesForTime, type HrrrPointSample } from "../lib/hrrr";
+import { getRadarFrames, getRadarPointReflectivity } from "../lib/radar";
 import RadarMap from "./components/RadarMap";
 import ForecastRadar from "./components/ForecastRadar";
 import ThreatBanner from "./components/ThreatBanner";
@@ -21,6 +22,11 @@ function observedTime(value:string|null){if(!value)return"Latest observation";co
 function forecastTime(value:string){const date=new Date(value);return Number.isNaN(date.getTime())?"—":date.toLocaleTimeString("en-US",{timeZone:"America/Chicago",hour:"numeric"});}
 function precipitationForecast(text:string){const value=text.toLowerCase();return value.includes("rain")||value.includes("shower")||value.includes("thunder")||value.includes("drizzle")||value.includes("sleet")||value.includes("snow")||value.includes("wintry")||value.includes("freezing");}
 function thunderForecast(text:string){const value=text.toLowerCase();return value.includes("thunder")||value.includes("storm");}
+function stationRainActive(observation: RawObservation | null) {
+  if (!observation) return false;
+  const rate = numberValue(observation,"rainratein") ?? numberValue(observation,"rainrate") ?? numberValue(observation,"hourlyrainin");
+  return rate !== null && rate > 0.001;
+}
 function radarDrivenIcon(period:HourlyForecastPeriod,sample:HrrrPointSample|null){
   const predicted=forecastIconKind(period.shortForecast,period.icon,period.precipitationChance);
   const forecastSaysPrecip=precipitationForecast(period.shortForecast);
@@ -31,31 +37,48 @@ function radarDrivenIcon(period:HourlyForecastPeriod,sample:HrrrPointSample|null
   if(sample.intensity==="strong") return thunderForecast(period.shortForecast)?predicted:forecastIconKind("Heavy Rain",period.icon,period.precipitationChance);
   return forecastSaysPrecip?cloudy:predicted;
 }
+function observedCurrentIcon(period:HourlyForecastPeriod,radarDbz:number|null,stationRaining:boolean){
+  const predicted=forecastIconKind(period.shortForecast,period.icon,period.precipitationChance);
+  const forecastSaysPrecip=precipitationForecast(period.shortForecast);
+  const cloudy=forecastIconKind("Mostly Cloudy",period.icon);
+  if((radarDbz??0)<10&&!stationRaining) return forecastSaysPrecip?cloudy:predicted;
+  if((radarDbz??0)>=45) return forecastIconKind("Heavy Rain",period.icon,period.precipitationChance);
+  if((radarDbz??0)>=30) return forecastIconKind("Rain",period.icon,period.precipitationChance);
+  return forecastIconKind("Light Rain",period.icon,period.precipitationChance);
+}
 
 export default async function Home(){
   let snapshot:AmbientSnapshot|null=null;
   let forecast:LocalForecast|null=null;
   let hrrrModelInitUtc:string|null=null;
-  const [ambientResult, forecastResult, hrrrMetaResult] = await Promise.allSettled([
+  let liveRadarDbz:number|null=null;
+  const [ambientResult, forecastResult, hrrrMetaResult, radarFramesResult] = await Promise.allSettled([
     getAmbientSnapshot(),
     getLocalForecast(BRIDGEPORT_LAT, BRIDGEPORT_LON),
     getHrrrModelInitUtc(),
+    getRadarFrames(),
   ]);
   if(ambientResult.status==="fulfilled") snapshot=ambientResult.value;
   if(forecastResult.status==="fulfilled") forecast=forecastResult.value;
   if(hrrrMetaResult.status==="fulfilled") hrrrModelInitUtc=hrrrMetaResult.value;
+  if(radarFramesResult.status==="fulfilled"&&radarFramesResult.value.length){
+    const latest=radarFramesResult.value[radarFramesResult.value.length-1];
+    liveRadarDbz=await getRadarPointReflectivity(BRIDGEPORT_LAT,BRIDGEPORT_LON,latest.observedAt);
+  }
 
   const metrics=snapshot?observationMetrics(snapshot.rawObservation):[{label:"Outdoor temperature",value:"Live data unavailable",detail:null},{label:"Wind",value:"Live data unavailable",detail:null},{label:"Rain",value:"Live data unavailable",detail:null},{label:"Solar",value:"Live data unavailable",detail:null}];
   const now = Date.now();
   const nextSix = forecast?.hourly.filter(period => Date.parse(period.startTime) + 3_600_000 > now).slice(0,6) ?? [];
   const later = forecast?.daily.slice(0,4) ?? [];
-  const hourlyRadarSamples = await Promise.all(nextSix.map(async period => {
+  const hourlyRadarSamples = await Promise.all(nextSix.map(async (period,index) => {
+    if(index===0) return null;
     const forecastMinutes = hrrrForecastMinutesForTime(period.startTime,hrrrModelInitUtc);
     return forecastMinutes===null ? null : getHrrrPointSample(BRIDGEPORT_LAT,BRIDGEPORT_LON,forecastMinutes);
   }));
 
   const currentPeriod=nextSix[0]??null;
-  const currentIconKind=currentPeriod?radarDrivenIcon(currentPeriod,hourlyRadarSamples[0]??null):forecastIconKind("Mostly Cloudy",null);
+  const stationRaining=stationRainActive(snapshot?.rawObservation??null);
+  const currentIconKind=currentPeriod?observedCurrentIcon(currentPeriod,liveRadarDbz,stationRaining):forecastIconKind("Mostly Cloudy",null);
 
   return <main>
     <input className="tabInput" type="radio" id="tab-radar" name="screen" defaultChecked/>
@@ -84,7 +107,7 @@ export default async function Home(){
       {nextSix.length ? <>
         <div className="forecastHours">
           {nextSix.map((period,index)=>{
-            const iconKind=radarDrivenIcon(period,hourlyRadarSamples[index]??null);
+            const iconKind=index===0?currentIconKind:radarDrivenIcon(period,hourlyRadarSamples[index]??null);
             return <article className="forecastHour" key={period.startTime}>
               <span className="forecastHourTime">{forecastTime(period.startTime)}</span>
               <WeatherIcon className="forecastHourIcon" kind={iconKind}/>
