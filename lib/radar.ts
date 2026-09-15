@@ -35,22 +35,26 @@ function toMercator(lat: number, lon: number): { x: number; y: number } {
   return { x, y };
 }
 
-// Candidate property names GeoServer commonly uses for a raw coverage value in a
-// GetFeatureInfo JSON response. This layer's exact key hasn't been verified against
-// the live NOAA service from this environment — if reflectivity reads always come back
-// null in production, log a sample response and add the real key here.
 const DBZ_PROPERTY_CANDIDATES = ["GRAY_INDEX", "gray_index", "value", "VALUE", "band1", "PALETTE_INDEX"];
 
-/**
- * Queries the NOAA WMS for the base-reflectivity value (dBZ) at a single point, using a
- * tiny GetFeatureInfo request centered on that point. Returns null if the service has no
- * data there (clear air) or the request/parsing fails.
- */
+function extractDbzValue(properties: Record<string, unknown>): number | null {
+  for (const key of DBZ_PROPERTY_CANDIDATES) {
+    const raw = properties[key];
+    const value = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : null;
+    if (value !== null && Number.isFinite(value)) return value;
+  }
+  for (const raw of Object.values(properties)) {
+    const value = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : null;
+    if (value !== null && Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
 export async function getRadarPointReflectivity(lat: number, lon: number, isoTime: string): Promise<number | null> {
   const center = toMercator(lat, lon);
-  const halfSizeMeters = 400; // small bbox around the point, in Web Mercator meters
+  const halfSizeMeters = 400;
   const bbox = [center.x - halfSizeMeters, center.y - halfSizeMeters, center.x + halfSizeMeters, center.y + halfSizeMeters].join(",");
-  const size = 3; // 3x3 px grid, query the center pixel
+  const size = 3;
 
   const url = new URL(NOAA_RADAR_WMS);
   url.search = new URLSearchParams({
@@ -71,19 +75,36 @@ export async function getRadarPointReflectivity(lat: number, lon: number, isoTim
     time: isoTime,
   }).toString();
 
+  let rawText: string;
   try {
     const response = await fetch(url, { next: { revalidate: 60 } });
-    if (!response.ok) return null;
-    const payload = await response.json();
-    const feature = payload?.features?.[0];
-    if (!feature?.properties) return null;
-    for (const key of DBZ_PROPERTY_CANDIDATES) {
-      const raw = feature.properties[key];
-      const value = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : null;
-      if (value !== null && Number.isFinite(value)) return value;
+    rawText = await response.text();
+    if (!response.ok) {
+      console.error(`Radar point reflectivity: HTTP ${response.status}`, rawText.slice(0, 500));
+      return null;
     }
-    return null;
-  } catch {
+  } catch (error) {
+    console.error("Radar point reflectivity: request failed", error);
     return null;
   }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawText);
+  } catch {
+    console.error("Radar point reflectivity: non-JSON response", rawText.slice(0, 500));
+    return null;
+  }
+
+  const feature = (payload as { features?: Array<{ properties?: Record<string, unknown> }> })?.features?.[0];
+  if (!feature?.properties) {
+    console.error("Radar point reflectivity: no feature in response", JSON.stringify(payload).slice(0, 500));
+    return null;
+  }
+
+  const value = extractDbzValue(feature.properties);
+  if (value === null) {
+    console.error("Radar point reflectivity: no numeric property found", JSON.stringify(feature.properties));
+  }
+  return value;
 }
