@@ -18,7 +18,6 @@ export default function RadarMap() {
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<typeof Leaflet | null>(null);
   const radarLayerRef = useRef<TileLayer.WMS | null>(null);
-  const fadeFrameRef = useRef<number | null>(null);
   const frameIndexRef = useRef(0);
   const [frames, setFrames] = useState<RadarFrame[]>([]);
   const [frameIndex, setFrameIndex] = useState(0);
@@ -70,7 +69,6 @@ export default function RadarMap() {
     });
     return () => {
       active = false;
-      if (fadeFrameRef.current) window.cancelAnimationFrame(fadeFrameRef.current);
       mapRef.current?.remove();
       mapRef.current = null;
     };
@@ -87,44 +85,57 @@ export default function RadarMap() {
     const map = mapRef.current;
     const L = leafletRef.current;
     const frame = frames[frameIndex];
-    if (!map || !L || !frame) return;
-    if (fadeFrameRef.current) window.cancelAnimationFrame(fadeFrameRef.current);
+    if (!map || !L || !frame || !mapReady) return;
 
     const previousLayer = radarLayerRef.current;
-    const nextLayer = L.tileLayer.wms("/api/radar/image", { layers: "conus_bref_qcd", format: "image/png", transparent: true, opacity: 0, time: frame.observedAt, zIndex: 400, tileSize: 256, updateWhenIdle: true } as L.WMSOptions).addTo(map);
-    radarLayerRef.current = nextLayer;
+    const nextLayer = L.tileLayer.wms("/api/radar/image", {
+      layers: "conus_bref_qcd",
+      format: "image/png",
+      transparent: true,
+      opacity: 0,
+      time: frame.observedAt,
+      zIndex: 400,
+      tileSize: 256,
+      updateWhenIdle: true,
+      keepBuffer: 2,
+    } as L.WMSOptions).addTo(map);
 
-    const startedAt = performance.now();
-    const duration = 950;
-    const targetOpacity = 0.72;
-    const fade = (now: number) => {
-      const progress = Math.min(1, (now - startedAt) / duration);
-      nextLayer.setOpacity(progress * targetOpacity);
-      previousLayer?.setOpacity((1 - progress) * targetOpacity);
-      if (progress < 1) {
-        fadeFrameRef.current = window.requestAnimationFrame(fade);
-        return;
-      }
-      if (previousLayer && map.hasLayer(previousLayer)) map.removeLayer(previousLayer);
-      fadeFrameRef.current = null;
+    let promoted = false;
+    const promote = () => {
+      if (promoted) return;
+      promoted = true;
+      nextLayer.setOpacity(0.72);
+      radarLayerRef.current = nextLayer;
+      if (previousLayer && previousLayer !== nextLayer && map.hasLayer(previousLayer)) map.removeLayer(previousLayer);
     };
-    fadeFrameRef.current = window.requestAnimationFrame(fade);
+
+    nextLayer.once("load", promote);
+
+    return () => {
+      nextLayer.off("load", promote);
+      if (radarLayerRef.current !== nextLayer && map.hasLayer(nextLayer)) map.removeLayer(nextLayer);
+    };
   }, [frames, frameIndex, mapReady]);
 
   useEffect(() => {
-    if (!playing || frames.length < 2) return;
-    const timer = window.setInterval(() => setFrameIndex((index) => (index + 1) % frames.length), 1300);
+    if (!playing || frames.length < 2 || mapInteraction) return;
+    const timer = window.setInterval(() => setFrameIndex((index) => (index + 1) % frames.length), 1800);
     return () => window.clearInterval(timer);
-  }, [playing, frames.length]);
+  }, [playing, frames.length, mapInteraction]);
 
   const currentFrame = frames[frameIndex];
   const isNewest = frameIndex === frames.length - 1;
+  const toggleMapInteraction = () => {
+    if (!mapInteraction) setPlaying(false);
+    setMapInteraction((value) => !value);
+  };
+
   return (
     <section className="radarSection" id="radar" aria-labelledby="radar-heading">
       <div className="sectionTitle radarHeading"><div><p className="kicker">LIVE OBSERVATIONS</p><h2 id="radar-heading">Bridgeport radar</h2></div><span className={`radarFreshness ${status}`}>{status === "ready" ? "NOAA LIVE" : status.toUpperCase()}</span></div>
       <div className="radarShell">
         <div ref={containerRef} className={`radarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label="Interactive NOAA radar map centered on Bridgeport, Chicago" />
-        {touchMap && <button type="button" className="mapInteractionButton" onClick={() => setMapInteraction((value) => !value)}>{mapInteraction ? "Done" : "Move map"}</button>}
+        {touchMap && <button type="button" className="mapInteractionButton" onClick={toggleMapInteraction}>{mapInteraction ? "Done" : "Move map"}</button>}
         <div className="radarReadout" aria-live="polite"><strong>{frameLabel(currentFrame?.observedAt)}</strong><span>{isNewest ? "Newest observation" : `${Math.max(0, frames.length - 1 - frameIndex)} frames before newest`}</span></div>
       </div>
       <div className="radarControls">

@@ -1,12 +1,11 @@
 "use client";
 
 import type * as Leaflet from "leaflet";
-import type { Map as LeafletMap, TileLayer } from "leaflet";
+import type { ImageOverlay, Map as LeafletMap } from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
-const HRRR_TMS_BASE = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0";
-const TRANSPARENT_TILE = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+const HRRR_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi";
 
 type MetaPayload = { modelInitUtc: string | null };
 
@@ -15,29 +14,31 @@ function validTimeLabel(modelInitUtc: string | null, forecastMinutes: number) {
   const valid = new Date(Date.parse(modelInitUtc) + forecastMinutes * 60_000);
   return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(valid);
 }
+
 function runLabel(modelInitUtc: string | null) {
   if (!modelInitUtc) return "Latest HRRR run";
   return `Run ${new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(modelInitUtc))}`;
 }
+
 function runKey(modelInitUtc: string | null) {
-  if (!modelInitUtc) return "0";
+  if (!modelInitUtc) return "latest";
   const date = new Date(modelInitUtc);
-  if (Number.isNaN(date.getTime())) return "0";
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}`;
+  if (Number.isNaN(date.getTime())) return "latest";
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
 
 export default function ForecastRadar() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<typeof Leaflet | null>(null);
-  const layerRef = useRef<TileLayer | null>(null);
+  const overlayRef = useRef<ImageOverlay | null>(null);
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [mapReady, setMapReady] = useState(false);
   const [modelInitUtc, setModelInitUtc] = useState<string | null>(null);
   const [touchMap, setTouchMap] = useState(false);
   const [mapInteraction, setMapInteraction] = useState(false);
+  const [viewRevision, setViewRevision] = useState(0);
 
   useEffect(() => {
     void fetch("/api/forecast-radar/meta", { cache: "no-store" })
@@ -68,10 +69,15 @@ export default function ForecastRadar() {
       setTouchMap(isTouch);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
       L.circleMarker(LOCAL_TARGET, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d67", fillOpacity: 1 }).bindTooltip("Bridgeport", { direction: "top" }).addTo(map);
+      map.on("moveend zoomend", () => setViewRevision((value) => value + 1));
       mapRef.current = map;
       setMapReady(true);
     });
-    return () => { active = false; mapRef.current?.remove(); mapRef.current = null; };
+    return () => {
+      active = false;
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -85,45 +91,72 @@ export default function ForecastRadar() {
     const map = mapRef.current;
     const L = leafletRef.current;
     if (!map || !L || !mapReady) return;
+
     const frameMinutes = forecastMinutes[frameIndex];
-    const forecastKey = String(frameMinutes).padStart(4, "0");
-    const url = `${HRRR_TMS_BASE}/hrrr::REFD-F${forecastKey}-${runKey(modelInitUtc)}/{z}/{x}/{y}.png`;
-    const previous = layerRef.current;
-    const next = L.tileLayer(url, {
-      opacity: 0.72,
-      zIndex: 400,
-      maxZoom: 10,
-      tms: true,
-      errorTileUrl: TRANSPARENT_TILE,
-      attribution: "HRRR reflectivity via Iowa Environmental Mesonet",
-    }).addTo(map);
-    let replaced = false;
-    const replacePrevious = () => {
-      if (replaced) return;
-      replaced = true;
-      layerRef.current = next;
-      if (previous && map.hasLayer(previous)) map.removeLayer(previous);
+    const layerName = `refd_${String(frameMinutes).padStart(4, "0")}`;
+    const bounds = map.getBounds();
+    const sw = L.CRS.EPSG3857.project(bounds.getSouthWest());
+    const ne = L.CRS.EPSG3857.project(bounds.getNorthEast());
+    const size = map.getSize();
+    const width = Math.max(512, Math.min(1400, Math.round(size.x * 2)));
+    const height = Math.max(512, Math.min(1400, Math.round(size.y * 2)));
+    const params = new URLSearchParams({
+      SERVICE: "WMS",
+      VERSION: "1.1.1",
+      REQUEST: "GetMap",
+      LAYERS: layerName,
+      STYLES: "",
+      FORMAT: "image/png",
+      TRANSPARENT: "true",
+      SRS: "EPSG:3857",
+      BBOX: `${sw.x},${sw.y},${ne.x},${ne.y}`,
+      WIDTH: String(width),
+      HEIGHT: String(height),
+      RUN: runKey(modelInitUtc),
+    });
+    const url = `${HRRR_WMS}?${params.toString()}`;
+    const previous = overlayRef.current;
+    const next = L.imageOverlay(url, bounds, { opacity: 0, zIndex: 400, interactive: false }).addTo(map);
+
+    let promoted = false;
+    const promote = () => {
+      if (promoted) return;
+      promoted = true;
+      next.setOpacity(0.72);
+      overlayRef.current = next;
+      if (previous && previous !== next && map.hasLayer(previous)) map.removeLayer(previous);
     };
-    next.once("load", replacePrevious);
+    const discard = () => {
+      if (map.hasLayer(next)) map.removeLayer(next);
+    };
+
+    next.once("load", promote);
+    next.once("error", discard);
+
     return () => {
-      next.off("load", replacePrevious);
-      if (layerRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
+      next.off("load", promote);
+      next.off("error", discard);
+      if (overlayRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
     };
-  }, [forecastMinutes, frameIndex, mapReady, modelInitUtc]);
+  }, [forecastMinutes, frameIndex, mapReady, modelInitUtc, viewRevision]);
 
   useEffect(() => {
-    if (!playing) return;
-    const timer = window.setInterval(() => setFrameIndex((index) => (index + 1) % forecastMinutes.length), 1700);
+    if (!playing || mapInteraction) return;
+    const timer = window.setInterval(() => setFrameIndex((index) => (index + 1) % forecastMinutes.length), 1900);
     return () => window.clearInterval(timer);
-  }, [forecastMinutes.length, playing]);
+  }, [forecastMinutes.length, playing, mapInteraction]);
 
   const frameMinutes = forecastMinutes[frameIndex];
   const relativeHours = frameIndex;
+  const toggleMapInteraction = () => {
+    if (!mapInteraction) setPlaying(false);
+    setMapInteraction((value) => !value);
+  };
 
   return <div className="forecastRadarPlayer">
     <div className="radarShell forecastRadarShell">
       <div ref={containerRef} className={`radarMap forecastRadarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label="HRRR six-hour simulated reflectivity forecast centered on Bridgeport, Chicago" />
-      {touchMap && <button type="button" className="mapInteractionButton" onClick={() => setMapInteraction((value) => !value)}>{mapInteraction ? "Done" : "Move map"}</button>}
+      {touchMap && <button type="button" className="mapInteractionButton" onClick={toggleMapInteraction}>{mapInteraction ? "Done" : "Move map"}</button>}
       <div className="radarReadout" aria-live="polite"><strong>{validTimeLabel(modelInitUtc, frameMinutes)}</strong><span>{relativeHours === 0 ? "First future HRRR hour" : `+${relativeHours} hr from start`} · HRRR F+{frameMinutes / 60} · {runLabel(modelInitUtc)}</span></div>
     </div>
     <div className="radarControls">
