@@ -1,6 +1,7 @@
 import { getAmbientSnapshot, type AmbientSnapshot, type RawObservation } from "../lib/ambient";
 import { getLocalForecast, type LocalForecast, type HourlyForecastPeriod } from "../lib/forecast";
 import { getHrrrModelInitUtc, getHrrrPointSample, hrrrForecastMinutesForTime, type HrrrPointSample } from "../lib/hrrr";
+import { forecastConsensus } from "../lib/forecastConsensus";
 import { getRadarFrames, getRadarPointReflectivity } from "../lib/radar";
 import RadarMap from "./components/RadarMap";
 import ForecastRadar from "./components/ForecastRadar";
@@ -8,125 +9,11 @@ import ThreatBanner from "./components/ThreatBanner";
 import AlertsList from "./components/AlertsList";
 import BottomNav from "./components/BottomNav";
 import WeatherIcon, { forecastIconKind } from "./components/WeatherIcon";
-
-export const dynamic = "force-dynamic";
-
-const BRIDGEPORT_LAT = 41.8382;
-const BRIDGEPORT_LON = -87.6331;
-
-function numberValue(observation: RawObservation, key: string) { const value = observation[key]; return typeof value === "number" ? value : null; }
-function formatNumber(value: number | null, unit: string, digits = 1) { return value === null ? "Not reported" : `${value.toFixed(digits)}${unit}`; }
-function cardinalDirection(degrees: number | null) { if (degrees === null) return null; const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]; return directions[Math.round(degrees / 45) % directions.length]; }
-function observationMetrics(observation: RawObservation) { const windSpeed = numberValue(observation, "windspeedmph") ?? numberValue(observation, "windspdmph_avg10m"); const direction = cardinalDirection(numberValue(observation, "winddir")); const gust = numberValue(observation, "windgustmph"); const pressure = numberValue(observation, "baromrelin") ?? numberValue(observation, "baromabsin"); return [ { label:"Outdoor temperature",value:formatNumber(numberValue(observation,"tempf"),"°F"),detail:null }, { label:"Wind",value:`${formatNumber(windSpeed," mph")}${direction?` ${direction}`:""}`,detail:gust===null?null:`Gust ${gust.toFixed(1)} mph` }, { label:"Humidity",value:formatNumber(numberValue(observation,"humidity"),"%",0),detail:null }, { label:"Pressure",value:formatNumber(pressure," inHg",2),detail:null }, { label:"Rain today",value:formatNumber(numberValue(observation,"dailyrainin")," in",2),detail:null }, { label:"Rain rate",value:formatNumber(numberValue(observation,"hourlyrainin")," in/hr",2),detail:null }, { label:"Solar radiation",value:formatNumber(numberValue(observation,"solarradiation")," W/m²",0),detail:null }, { label:"UV index",value:formatNumber(numberValue(observation,"uv"),"",0),detail:null } ]; }
-function observedTime(value:string|null){if(!value)return"Latest observation";const date=new Date(value);return Number.isNaN(date.getTime())?"Latest observation":`Observed ${date.toLocaleString("en-US",{timeZone:"America/Chicago",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZoneName:"short"})}`;}
-function forecastTime(value:string){const date=new Date(value);return Number.isNaN(date.getTime())?"—":date.toLocaleTimeString("en-US",{timeZone:"America/Chicago",hour:"numeric"});}
-function precipitationForecast(text:string){const value=text.toLowerCase();return value.includes("rain")||value.includes("shower")||value.includes("thunder")||value.includes("drizzle")||value.includes("sleet")||value.includes("snow")||value.includes("wintry")||value.includes("freezing");}
-function thunderForecast(text:string){const value=text.toLowerCase();return value.includes("thunder")||value.includes("storm");}
-function stationRainActive(observation: RawObservation | null) {
-  if (!observation) return false;
-  const rate = numberValue(observation,"rainratein") ?? numberValue(observation,"rainrate") ?? numberValue(observation,"hourlyrainin");
-  return rate !== null && rate > 0.001;
-}
-function radarDrivenIcon(period:HourlyForecastPeriod,sample:HrrrPointSample|null){
-  const predicted=forecastIconKind(period.shortForecast,period.icon,period.precipitationChance);
-  const forecastSaysPrecip=precipitationForecast(period.shortForecast);
-  const cloudy=forecastIconKind("Mostly Cloudy",period.icon);
-  if(sample?.precipitation!==true||sample.intensity==="none") return forecastSaysPrecip?cloudy:predicted;
-  if(sample.intensity==="light") return forecastIconKind("Light Rain",period.icon,period.precipitationChance);
-  if(sample.intensity==="moderate") return forecastIconKind("Rain",period.icon,period.precipitationChance);
-  if(sample.intensity==="strong") return thunderForecast(period.shortForecast)?predicted:forecastIconKind("Heavy Rain",period.icon,period.precipitationChance);
-  return forecastSaysPrecip?cloudy:predicted;
-}
-function observedCurrentIcon(period:HourlyForecastPeriod,radarDbz:number|null,stationRaining:boolean){
-  const predicted=forecastIconKind(period.shortForecast,period.icon,period.precipitationChance);
-  const forecastSaysPrecip=precipitationForecast(period.shortForecast);
-  const cloudy=forecastIconKind("Mostly Cloudy",period.icon);
-  if((radarDbz??0)<10&&!stationRaining) return forecastSaysPrecip?cloudy:predicted;
-  if((radarDbz??0)>=45) return forecastIconKind("Heavy Rain",period.icon,period.precipitationChance);
-  if((radarDbz??0)>=30) return forecastIconKind("Rain",period.icon,period.precipitationChance);
-  return forecastIconKind("Light Rain",period.icon,period.precipitationChance);
-}
-
-export default async function Home(){
-  let snapshot:AmbientSnapshot|null=null;
-  let forecast:LocalForecast|null=null;
-  let hrrrModelInitUtc:string|null=null;
-  let liveRadarDbz:number|null=null;
-  const [ambientResult, forecastResult, hrrrMetaResult, radarFramesResult] = await Promise.allSettled([
-    getAmbientSnapshot(),
-    getLocalForecast(BRIDGEPORT_LAT, BRIDGEPORT_LON),
-    getHrrrModelInitUtc(),
-    getRadarFrames(),
-  ]);
-  if(ambientResult.status==="fulfilled") snapshot=ambientResult.value;
-  if(forecastResult.status==="fulfilled") forecast=forecastResult.value;
-  if(hrrrMetaResult.status==="fulfilled") hrrrModelInitUtc=hrrrMetaResult.value;
-  if(radarFramesResult.status==="fulfilled"&&radarFramesResult.value.length){
-    const latest=radarFramesResult.value[radarFramesResult.value.length-1];
-    liveRadarDbz=await getRadarPointReflectivity(BRIDGEPORT_LAT,BRIDGEPORT_LON,latest.observedAt);
-  }
-
-  const metrics=snapshot?observationMetrics(snapshot.rawObservation):[{label:"Outdoor temperature",value:"Live data unavailable",detail:null},{label:"Wind",value:"Live data unavailable",detail:null},{label:"Rain",value:"Live data unavailable",detail:null},{label:"Solar",value:"Live data unavailable",detail:null}];
-  const now = Date.now();
-  const nextSix = forecast?.hourly.filter(period => Date.parse(period.startTime) + 3_600_000 > now).slice(0,6) ?? [];
-  const later = forecast?.daily.slice(0,4) ?? [];
-  const hourlyRadarSamples = await Promise.all(nextSix.map(async (period,index) => {
-    if(index===0) return null;
-    const forecastMinutes = hrrrForecastMinutesForTime(period.startTime,hrrrModelInitUtc);
-    return forecastMinutes===null ? null : getHrrrPointSample(BRIDGEPORT_LAT,BRIDGEPORT_LON,forecastMinutes);
-  }));
-
-  const currentPeriod=nextSix[0]??null;
-  const stationRaining=stationRainActive(snapshot?.rawObservation??null);
-  const currentIconKind=currentPeriod?observedCurrentIcon(currentPeriod,liveRadarDbz,stationRaining):forecastIconKind("Mostly Cloudy",null);
-
-  return <main>
-    <input className="tabInput" type="radio" id="tab-radar" name="screen" defaultChecked/>
-    <input className="tabInput" type="radio" id="tab-station" name="screen"/>
-    <input className="tabInput" type="radio" id="tab-forecast" name="screen"/>
-
-    <section className="tabPanel radarPanel" aria-labelledby="radar-title">
-      <h1 id="radar-title">Bridgeport Severe Weather</h1><ThreatBanner/><AlertsList/><RadarMap/>
-    </section>
-
-    <section className="tabPanel stationPanel" aria-labelledby="station-title">
-      <div className="stationHeader">
-        <div className="stationTopline"><p className="eyebrow">BRIDGEPORT · CHICAGO</p><span className={`live ${snapshot?"connected":""}`}><i/> {snapshot?"LIVE":"OFFLINE"}</span></div>
-        <div className="stationTitleRow">
-          <h1 id="station-title">Current Local Weather</h1>
-          <WeatherIcon className="stationCurrentIcon" kind={currentIconKind}/>
-        </div>
-        {snapshot&&<p className="stationObserved">{observedTime(snapshot.observedAt)}</p>}
-      </div>
-      <div className="grid stationGrid">{metrics.map((metric,index)=><article className={`metric ${index<2?"metricFeatured":""}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong>{metric.detail&&<small>{metric.detail}</small>}</article>)}</div>
-    </section>
-
-    <section className="tabPanel forecastPanel" aria-labelledby="forecast-title">
-      <p className="eyebrow">BRIDGEPORT · CHICAGO</p>
-      <h1 id="forecast-title">Next 6 Hours</h1>
-      {nextSix.length ? <>
-        <div className="forecastHours">
-          {nextSix.map((period,index)=>{
-            const iconKind=index===0?currentIconKind:radarDrivenIcon(period,hourlyRadarSamples[index]??null);
-            return <article className="forecastHour" key={period.startTime}>
-              <span className="forecastHourTime">{forecastTime(period.startTime)}</span>
-              <WeatherIcon className="forecastHourIcon" kind={iconKind}/>
-              <strong>{period.temperature}°</strong>
-              <span>{period.shortForecast}</span>
-              <small>{period.precipitationChance===null?"Rain chance —":`${period.precipitationChance}% rain`}</small>
-              <small>{period.windDirection} {period.windSpeed}</small>
-            </article>})}
-        </div>
-        <section className="forecastRadarCard" aria-labelledby="forecast-radar-title">
-          <div className="sectionTitle radarHeading"><div><p className="kicker">MODEL GUIDANCE</p><h2 id="forecast-radar-title">6-Hour Forecast Radar</h2></div><span>HRRR</span></div>
-          <ForecastRadar />
-        </section>
-        <div className="sectionTitle forecastOutlookTitle"><h3>Later outlook</h3><span>NWS</span></div>
-        <div className="forecastOutlook">
-          {later.map(period=><article key={`${period.number}-${period.startTime}`}><div><strong>{period.name}</strong><span>{period.shortForecast}</span></div><b>{period.temperature}°</b></article>)}
-        </div>
-      </> : <div className="emptyState"><strong>Forecast temporarily unavailable</strong><p>The NWS local forecast feed could not be reached. Live radar and local station observations remain available.</p></div>}
-    </section>
-    <BottomNav/>
-  </main>
-}
+export const dynamic="force-dynamic";const BRIDGEPORT_LAT=41.8382,BRIDGEPORT_LON=-87.6331;
+function numberValue(o:RawObservation,k:string){const v=o[k];return typeof v==="number"?v:null}function formatNumber(v:number|null,u:string,d=1){return v===null?"Not reported":`${v.toFixed(d)}${u}`}function cardinalDirection(d:number|null){if(d===null)return null;return["N","NE","E","SE","S","SW","W","NW"][Math.round(d/45)%8]}
+function observationMetrics(o:RawObservation){const w=numberValue(o,"windspeedmph")??numberValue(o,"windspdmph_avg10m"),dir=cardinalDirection(numberValue(o,"winddir")),g=numberValue(o,"windgustmph"),p=numberValue(o,"baromrelin")??numberValue(o,"baromabsin");return[{label:"Outdoor temperature",value:formatNumber(numberValue(o,"tempf"),"°F"),detail:null},{label:"Wind",value:`${formatNumber(w," mph")}${dir?` ${dir}`:""}`,detail:g===null?null:`Gust ${g.toFixed(1)} mph`},{label:"Humidity",value:formatNumber(numberValue(o,"humidity"),"%",0),detail:null},{label:"Pressure",value:formatNumber(p," inHg",2),detail:null},{label:"Rain today",value:formatNumber(numberValue(o,"dailyrainin")," in",2),detail:null},{label:"Rain rate",value:formatNumber(numberValue(o,"hourlyrainin")," in/hr",2),detail:null},{label:"Solar radiation",value:formatNumber(numberValue(o,"solarradiation")," W/m²",0),detail:null},{label:"UV index",value:formatNumber(numberValue(o,"uv"),"",0),detail:null}]}
+function observedTime(v:string|null){if(!v)return"Latest observation";const d=new Date(v);return Number.isNaN(d.getTime())?"Latest observation":`Observed ${d.toLocaleString("en-US",{timeZone:"America/Chicago",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZoneName:"short"})}`}function forecastTime(v:string){const d=new Date(v);return Number.isNaN(d.getTime())?"—":d.toLocaleTimeString("en-US",{timeZone:"America/Chicago",hour:"numeric"})}function precipitationForecast(t:string){const v=t.toLowerCase();return v.includes("rain")||v.includes("shower")||v.includes("thunder")||v.includes("drizzle")||v.includes("sleet")||v.includes("snow")||v.includes("freezing")}function stationRainActive(o:RawObservation|null){if(!o)return false;const r=numberValue(o,"rainratein")??numberValue(o,"rainrate")??numberValue(o,"hourlyrainin");return r!==null&&r>.001}
+function consensusIcon(p:HourlyForecastPeriod,s:HrrrPointSample|null){const c=forecastConsensus(p,s),cloudy=forecastIconKind("Mostly Cloudy",p.icon);if(!c.precipitation)return precipitationForecast(p.shortForecast)?cloudy:forecastIconKind(p.shortForecast,p.icon,p.precipitationChance);if(c.thunder)return forecastIconKind("Thunderstorms",p.icon,p.precipitationChance);if(s?.intensity==="strong")return forecastIconKind("Heavy Rain",p.icon,p.precipitationChance);if(s?.intensity==="moderate")return forecastIconKind("Rain",p.icon,p.precipitationChance);return forecastIconKind("Light Rain",p.icon,p.precipitationChance)}
+function observedCurrentIcon(p:HourlyForecastPeriod,dbz:number|null,raining:boolean){const predicted=forecastIconKind(p.shortForecast,p.icon,p.precipitationChance),cloudy=forecastIconKind("Mostly Cloudy",p.icon);if((dbz??0)<10&&!raining)return precipitationForecast(p.shortForecast)?cloudy:predicted;if((dbz??0)>=45)return forecastIconKind("Heavy Rain",p.icon,p.precipitationChance);if((dbz??0)>=30)return forecastIconKind("Rain",p.icon,p.precipitationChance);return forecastIconKind("Light Rain",p.icon,p.precipitationChance)}
+export default async function Home(){let snapshot:AmbientSnapshot|null=null,forecast:LocalForecast|null=null,hrrrModelInitUtc:string|null=null,liveRadarDbz:number|null=null;const[a,f,h,r]=await Promise.allSettled([getAmbientSnapshot(),getLocalForecast(BRIDGEPORT_LAT,BRIDGEPORT_LON),getHrrrModelInitUtc(),getRadarFrames()]);if(a.status==="fulfilled")snapshot=a.value;if(f.status==="fulfilled")forecast=f.value;if(h.status==="fulfilled")hrrrModelInitUtc=h.value;if(r.status==="fulfilled"&&r.value.length){const latest=r.value[r.value.length-1];liveRadarDbz=await getRadarPointReflectivity(BRIDGEPORT_LAT,BRIDGEPORT_LON,latest.observedAt)}const metrics=snapshot?observationMetrics(snapshot.rawObservation):[{label:"Outdoor temperature",value:"Live data unavailable",detail:null},{label:"Wind",value:"Live data unavailable",detail:null},{label:"Rain",value:"Live data unavailable",detail:null},{label:"Solar",value:"Live data unavailable",detail:null}],now=Date.now(),nextSix=forecast?.hourly.filter(p=>Date.parse(p.startTime)+3600000>now).slice(0,6)??[],later=forecast?.daily.slice(0,4)??[];const samples=await Promise.all(nextSix.map(async(p,i)=>{if(i===0)return null;const m=hrrrForecastMinutesForTime(p.startTime,hrrrModelInitUtc);return m===null?null:getHrrrPointSample(BRIDGEPORT_LAT,BRIDGEPORT_LON,m)}));const current=nextSix[0]??null,stationRaining=stationRainActive(snapshot?.rawObservation??null),currentIcon=current?observedCurrentIcon(current,liveRadarDbz,stationRaining):forecastIconKind("Mostly Cloudy",null);
+return <main><input className="tabInput" type="radio" id="tab-radar" name="screen" defaultChecked/><input className="tabInput" type="radio" id="tab-station" name="screen"/><input className="tabInput" type="radio" id="tab-forecast" name="screen"/><section className="tabPanel radarPanel" aria-labelledby="radar-title"><h1 id="radar-title">Bridgeport Severe Weather</h1><ThreatBanner/><AlertsList/><RadarMap/></section><section className="tabPanel stationPanel" aria-labelledby="station-title"><div className="stationHeader"><div className="stationTopline"><p className="eyebrow">BRIDGEPORT · CHICAGO</p><span className={`live ${snapshot?"connected":""}`}><i/> {snapshot?"LIVE":"OFFLINE"}</span></div><div className="stationTitleRow"><h1 id="station-title">Current Local Weather</h1><WeatherIcon className="stationCurrentIcon" kind={currentIcon}/></div>{snapshot&&<p className="stationObserved">{observedTime(snapshot.observedAt)}</p>}</div><div className="grid stationGrid">{metrics.map((m,i)=><article className={`metric ${i<2?"metricFeatured":""}`} key={m.label}><span>{m.label}</span><strong>{m.value}</strong>{m.detail&&<small>{m.detail}</small>}</article>)}</div></section><section className="tabPanel forecastPanel" aria-labelledby="forecast-title"><p className="eyebrow">BRIDGEPORT · CHICAGO</p><h1 id="forecast-title">Next 6 Hours</h1>{nextSix.length?<><div className="forecastHours">{nextSix.map((p,i)=>{const kind=i===0?currentIcon:consensusIcon(p,samples[i]??null);return <article className="forecastHour" key={p.startTime}><span className="forecastHourTime">{forecastTime(p.startTime)}</span><WeatherIcon className="forecastHourIcon" kind={kind}/><strong>{p.temperature}°</strong><span>{p.shortForecast}</span><small>{p.precipitationChance===null?"Rain chance —":`${p.precipitationChance}% rain`}</small><small>{p.windDirection} {p.windSpeed}</small></article>})}</div><section className="forecastRadarCard" aria-labelledby="forecast-radar-title"><div className="sectionTitle radarHeading"><div><p className="kicker">FORECAST CONSENSUS</p><h2 id="forecast-radar-title">6-Hour Forecast Radar</h2></div><span>HRRR + NWS</span></div><ForecastRadar/></section><div className="sectionTitle forecastOutlookTitle"><h3>Later outlook</h3><span>NWS</span></div><div className="forecastOutlook">{later.map(p=><article key={`${p.number}-${p.startTime}`}><div><strong>{p.name}</strong><span>{p.shortForecast}</span></div><b>{p.temperature}°</b></article>)}</div></>:<div className="emptyState"><strong>Forecast temporarily unavailable</strong><p>The NWS local forecast feed could not be reached. Live radar and local station observations remain available.</p></div>}</section><BottomNav/></main>}
