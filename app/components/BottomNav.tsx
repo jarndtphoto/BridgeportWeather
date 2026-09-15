@@ -7,21 +7,36 @@ const tabs = [
 ] as const;
 
 export default function BottomNav() {
+  const snapToTop = () => {
+    document.documentElement.style.scrollBehavior = "auto";
+    document.body.style.scrollBehavior = "auto";
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    window.scrollTo(0, 0);
+  };
+
   const finishTabChange = () => {
-    window.setTimeout(() => {
+    snapToTop();
+    window.requestAnimationFrame(() => {
+      snapToTop();
       window.requestAnimationFrame(() => {
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-        window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+        snapToTop();
         window.dispatchEvent(new Event("resize"));
       });
-    }, 0);
+    });
   };
 
   return (
     <nav className="bottomNav" aria-label="Primary">
       {tabs.map(([id, label]) => (
-        <label key={id} htmlFor={id} onClick={finishTabChange}>{label}</label>
+        <label
+          key={id}
+          htmlFor={id}
+          onPointerDown={snapToTop}
+          onClick={finishTabChange}
+        >
+          {label}
+        </label>
       ))}
     </nav>
   );
