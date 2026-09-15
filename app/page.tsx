@@ -14,7 +14,7 @@ const BRIDGEPORT_LON = -87.6331;
 function numberValue(observation: RawObservation, key: string) { const value = observation[key]; return typeof value === "number" ? value : null; }
 function formatNumber(value: number | null, unit: string, digits = 1) { return value === null ? "Not reported" : `${value.toFixed(digits)}${unit}`; }
 function cardinalDirection(degrees: number | null) { if (degrees === null) return null; const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]; return directions[Math.round(degrees / 45) % directions.length]; }
-function observationMetrics(observation: RawObservation) { const windSpeed = numberValue(observation, "windspeedmph") ?? numberValue(observation, "windspdmph_avg10m"); const direction = cardinalDirection(numberValue(observation, "winddir")); const gust = numberValue(observation, "windgustmph"); const pressure = numberValue(observation, "baromrelin") ?? numberValue(observation, "baromabsin"); return [ { label:"Wind",value:`${formatNumber(windSpeed," mph")}${direction?` ${direction}`:""}`,detail:gust===null?null:`Gust ${gust.toFixed(1)} mph` }, { label:"Outdoor temperature",value:formatNumber(numberValue(observation,"tempf"),"°F"),detail:null }, { label:"Humidity",value:formatNumber(numberValue(observation,"humidity"),"%",0),detail:null }, { label:"Pressure",value:formatNumber(pressure," inHg",2),detail:null }, { label:"Rain today",value:formatNumber(numberValue(observation,"dailyrainin")," in",2),detail:null }, { label:"Rain rate",value:formatNumber(numberValue(observation,"hourlyrainin")," in/hr",2),detail:null }, { label:"Solar radiation",value:formatNumber(numberValue(observation,"solarradiation")," W/m²",0),detail:null }, { label:"UV index",value:formatNumber(numberValue(observation,"uv"),"",0),detail:null } ]; }
+function observationMetrics(observation: RawObservation) { const windSpeed = numberValue(observation, "windspeedmph") ?? numberValue(observation, "windspdmph_avg10m"); const direction = cardinalDirection(numberValue(observation, "winddir")); const gust = numberValue(observation, "windgustmph"); const pressure = numberValue(observation, "baromrelin") ?? numberValue(observation, "baromabsin"); return [ { label:"Outdoor temperature",value:formatNumber(numberValue(observation,"tempf"),"°F"),detail:null }, { label:"Wind",value:`${formatNumber(windSpeed," mph")}${direction?` ${direction}`:""}`,detail:gust===null?null:`Gust ${gust.toFixed(1)} mph` }, { label:"Humidity",value:formatNumber(numberValue(observation,"humidity"),"%",0),detail:null }, { label:"Pressure",value:formatNumber(pressure," inHg",2),detail:null }, { label:"Rain today",value:formatNumber(numberValue(observation,"dailyrainin")," in",2),detail:null }, { label:"Rain rate",value:formatNumber(numberValue(observation,"hourlyrainin")," in/hr",2),detail:null }, { label:"Solar radiation",value:formatNumber(numberValue(observation,"solarradiation")," W/m²",0),detail:null }, { label:"UV index",value:formatNumber(numberValue(observation,"uv"),"",0),detail:null } ]; }
 function observedTime(value:string|null){if(!value)return"Latest observation";const date=new Date(value);return Number.isNaN(date.getTime())?"Latest observation":`Observed ${date.toLocaleString("en-US",{timeZone:"America/Chicago",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZoneName:"short"})}`;}
 function forecastTime(value:string){const date=new Date(value);return Number.isNaN(date.getTime())?"—":date.toLocaleTimeString("en-US",{timeZone:"America/Chicago",hour:"numeric"});}
 
@@ -28,7 +28,7 @@ export default async function Home(){
   if(ambientResult.status==="fulfilled") snapshot=ambientResult.value;
   if(forecastResult.status==="fulfilled") forecast=forecastResult.value;
 
-  const metrics=snapshot?observationMetrics(snapshot.rawObservation):[{label:"Wind",value:"Live data unavailable",detail:null},{label:"Outdoor temperature",value:"Live data unavailable",detail:null},{label:"Rain",value:"Live data unavailable",detail:null},{label:"Solar",value:"Live data unavailable",detail:null}];
+  const metrics=snapshot?observationMetrics(snapshot.rawObservation):[{label:"Outdoor temperature",value:"Live data unavailable",detail:null},{label:"Wind",value:"Live data unavailable",detail:null},{label:"Rain",value:"Live data unavailable",detail:null},{label:"Solar",value:"Live data unavailable",detail:null}];
   const nextSix = forecast?.hourly.slice(0,6) ?? [];
   const later = forecast?.daily.slice(0,4) ?? [];
 
@@ -42,10 +42,11 @@ export default async function Home(){
     </section>
 
     <section className="tabPanel stationPanel" aria-labelledby="station-title">
-      <div className="screenHeader"><div><p className="eyebrow">BRIDGEPORT · CHICAGO</p><h1 id="station-title">Current Local Weather</h1></div><span className={`live ${snapshot?"connected":""}`}><i/> {snapshot?"LIVE":"OFFLINE"}</span></div>
-      {snapshot&&<div className="stationMeta stationMetaTime"><span>{observedTime(snapshot.observedAt)}</span></div>}
-      <div className="grid">{metrics.map(metric=><article className="metric" key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong>{metric.detail&&<small>{metric.detail}</small>}</article>)}</div>
-      <p className="note">Raw observations are retained. Wind reflects the intentionally exposed second-story deck. Temperature, rainfall, and elevated wind are direct sensor readings—not corrected ground truth.</p>
+      <div className="screenHeader stationHeader">
+        <div><p className="eyebrow">BRIDGEPORT · CHICAGO</p><h1 id="station-title">Current Local Weather</h1>{snapshot&&<p className="stationObserved">{observedTime(snapshot.observedAt)}</p>}</div>
+        <span className={`live ${snapshot?"connected":""}`}><i/> {snapshot?"LIVE":"OFFLINE"}</span>
+      </div>
+      <div className="grid stationGrid">{metrics.map((metric,index)=><article className={`metric ${index<2?"metricFeatured":""}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong>{metric.detail&&<small>{metric.detail}</small>}</article>)}</div>
     </section>
 
     <section className="tabPanel forecastPanel" aria-labelledby="forecast-title">
