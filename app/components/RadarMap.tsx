@@ -1,6 +1,7 @@
 "use client";
 
-import L, { type Map as LeafletMap, type TileLayer } from "leaflet";
+import type * as Leaflet from "leaflet";
+import type { Map as LeafletMap, TileLayer } from "leaflet";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
@@ -15,11 +16,13 @@ function frameLabel(value?: string) {
 export default function RadarMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
+  const leafletRef = useRef<typeof Leaflet | null>(null);
   const radarLayerRef = useRef<TileLayer.WMS | null>(null);
   const frameIndexRef = useRef(0);
   const [frames, setFrames] = useState<RadarFrame[]>([]);
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
+  const [mapReady, setMapReady] = useState(false);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => { frameIndexRef.current = frameIndex; }, [frameIndex]);
@@ -47,22 +50,29 @@ export default function RadarMap() {
   }, [loadFrames]);
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-    const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(BRIDGEPORT_CENTER, 8);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
-    L.circleMarker(BRIDGEPORT_CENTER, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d67", fillOpacity: 1 }).bindTooltip("Bridgeport target area", { direction: "top" }).addTo(map);
-    L.circle(BRIDGEPORT_CENTER, { radius: 1500, color: "#ff7185", weight: 1, fillColor: "#ff4d67", fillOpacity: 0.06, dashArray: "5 6" }).addTo(map);
-    mapRef.current = map;
-    return () => { map.remove(); mapRef.current = null; };
+    let active = true;
+    void import("leaflet").then((module) => {
+      if (!active || !containerRef.current || mapRef.current) return;
+      const L = module.default;
+      leafletRef.current = L;
+      const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(BRIDGEPORT_CENTER, 8);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+      L.circleMarker(BRIDGEPORT_CENTER, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d67", fillOpacity: 1 }).bindTooltip("Bridgeport target area", { direction: "top" }).addTo(map);
+      L.circle(BRIDGEPORT_CENTER, { radius: 1500, color: "#ff7185", weight: 1, fillColor: "#ff4d67", fillOpacity: 0.06, dashArray: "5 6" }).addTo(map);
+      mapRef.current = map;
+      setMapReady(true);
+    });
+    return () => { active = false; mapRef.current?.remove(); mapRef.current = null; };
   }, []);
 
   useEffect(() => {
     const map = mapRef.current;
+    const L = leafletRef.current;
     const frame = frames[frameIndex];
-    if (!map || !frame) return;
+    if (!map || !L || !frame) return;
     if (radarLayerRef.current) map.removeLayer(radarLayerRef.current);
     radarLayerRef.current = L.tileLayer.wms("/api/radar/image", { layers: "conus_bref_qcd", format: "image/png", transparent: true, opacity: 0.72, time: frame.observedAt, zIndex: 400, tileSize: 256, updateWhenIdle: true } as L.WMSOptions).addTo(map);
-  }, [frames, frameIndex]);
+  }, [frames, frameIndex, mapReady]);
 
   useEffect(() => {
     if (!playing || frames.length < 2) return;
