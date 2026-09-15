@@ -22,7 +22,7 @@ export async function GET() {
   const pressureInHg = snapshot ? numberField(snapshot.rawObservation, "baromrelin") ?? numberField(snapshot.rawObservation, "baromabsin") : null;
   const pressureTrendInHgPerHr = recordPressure(pressureInHg);
   const radarDbz = latestFrame ? await getRadarPointReflectivity(BRIDGEPORT_LAT, BRIDGEPORT_LON, latestFrame.observedAt) : null;
-  const evolution = await assessStormEvolution(BRIDGEPORT_LAT, BRIDGEPORT_LON, frames, radarDbz);
+  const evolution = await assessStormEvolution(BRIDGEPORT_LAT, BRIDGEPORT_LON, frames, radarDbz, hourlyRainIn);
   const assessment = assessThreat({ windGustMph, hourlyRainIn, radarDbz, strongestNearbyDbz: evolution.strongestNearbyDbz, stormTrend: evolution.trend, stormMotion: evolution.motion, pressureTrendInHgPerHr, alertsHere: alerts.here, alertsNearby: alerts.nearby, probSevereStorm: probSevere.storm });
   return Response.json({ assessment, evolution, probSevere, inputs: { windGustMph, hourlyRainIn, radarDbz, strongestNearbyDbz: evolution.strongestNearbyDbz, stormTrend: evolution.trend, stormMotion: evolution.motion, pressureTrendInHgPerHr, stationOnline: snapshot !== null, radarFrameTime: latestFrame?.observedAt ?? null, alertCountHere: alerts.here.length, alertCountNearby: alerts.nearby.length } }, { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" } });
 }
