@@ -1,96 +1,14 @@
+import type { NwsAlert } from "./nws";
 export type ThreatLevel = "none" | "monitor" | "elevated" | "severe";
-export type ThreatCategory = "wind" | "hail" | "heavyRain" | "rotation";
-
-export type ThreatFactor = {
-  category: ThreatCategory;
-  level: ThreatLevel;
-  headline: string;
-  detail: string;
-};
-
-export type ThreatAssessment = {
-  overallLevel: ThreatLevel;
-  factors: ThreatFactor[];
-  generatedAt: string;
-};
-
-export type ThreatInput = {
-  windGustMph: number | null;
-  hourlyRainIn: number | null;
-  /** Radar base reflectivity at the Bridgeport point, in dBZ. Used as a proxy for
-   *  storm-core intensity (heavy rain / possible hail), not a direct hail sensor. */
-  radarDbz: number | null;
-  /** Pressure change over the trailing window, inHg/hr. Negative = falling. */
-  pressureTrendInHgPerHr: number | null;
-};
-
-const LEVEL_RANK: Record<ThreatLevel, number> = { none: 0, monitor: 1, elevated: 2, severe: 3 };
-
-function higherLevel(a: ThreatLevel, b: ThreatLevel): ThreatLevel {
-  return LEVEL_RANK[a] >= LEVEL_RANK[b] ? a : b;
-}
-
-function assessWind(gustMph: number | null): ThreatFactor {
-  if (gustMph === null) {
-    return { category: "wind", level: "none", headline: "Wind: no data", detail: "Live gust reading is unavailable." };
-  }
-  // 58 mph / 50 kt gust is the NWS severe-thunderstorm wind threshold.
-  if (gustMph >= 58) return { category: "wind", level: "severe", headline: "Damaging wind gusts", detail: `Gusts to ${gustMph.toFixed(0)} mph meet the severe-thunderstorm wind threshold (58 mph).` };
-  if (gustMph >= 40) return { category: "wind", level: "elevated", headline: "Strong, gusty wind", detail: `Gusts to ${gustMph.toFixed(0)} mph. Below severe threshold but capable of minor damage.` };
-  if (gustMph >= 25) return { category: "wind", level: "monitor", headline: "Breezy to gusty", detail: `Gusts to ${gustMph.toFixed(0)} mph.` };
-  return { category: "wind", level: "none", headline: "Wind: nominal", detail: `Gusts to ${gustMph.toFixed(0)} mph.` };
-}
-
-function assessHail(radarDbz: number | null): ThreatFactor {
-  if (radarDbz === null) {
-    return { category: "hail", level: "none", headline: "Hail: no radar data", detail: "Point reflectivity is unavailable." };
-  }
-  // Reflectivity is a proxy, not a direct hail measurement — high dBZ correlates with
-  // dense/large hydrometeors but confirming hail requires dual-pol or a spotter report.
-  if (radarDbz >= 55) return { category: "hail", level: "severe", headline: "Large hail possible", detail: `Reflectivity of ${radarDbz.toFixed(0)} dBZ overhead is consistent with a very intense core; large hail is possible.` };
-  if (radarDbz >= 50) return { category: "hail", level: "elevated", headline: "Hail possible", detail: `Reflectivity of ${radarDbz.toFixed(0)} dBZ suggests a strong core capable of producing hail.` };
-  if (radarDbz >= 45) return { category: "hail", level: "monitor", headline: "Strong core overhead", detail: `Reflectivity of ${radarDbz.toFixed(0)} dBZ. Heavy rain likely; small hail is possible.` };
-  return { category: "hail", level: "none", headline: "Hail: unlikely", detail: radarDbz > 0 ? `Reflectivity of ${radarDbz.toFixed(0)} dBZ.` : "No significant echo overhead." };
-}
-
-function assessHeavyRain(hourlyRainIn: number | null): ThreatFactor {
-  if (hourlyRainIn === null) {
-    return { category: "heavyRain", level: "none", headline: "Rain: no data", detail: "Live rain-rate reading is unavailable." };
-  }
-  if (hourlyRainIn >= 2) return { category: "heavyRain", level: "severe", headline: "Flash-flooding rain rates", detail: `Rain rate of ${hourlyRainIn.toFixed(2)} in/hr can produce flash flooding, especially over pavement and low-lying areas.` };
-  if (hourlyRainIn >= 1) return { category: "heavyRain", level: "elevated", headline: "Heavy rain", detail: `Rain rate of ${hourlyRainIn.toFixed(2)} in/hr — ponding on streets is likely.` };
-  if (hourlyRainIn >= 0.3) return { category: "heavyRain", level: "monitor", headline: "Moderate rain", detail: `Rain rate of ${hourlyRainIn.toFixed(2)} in/hr.` };
-  return { category: "heavyRain", level: "none", headline: "Rain: light or none", detail: hourlyRainIn > 0 ? `Rain rate of ${hourlyRainIn.toFixed(2)} in/hr.` : "No rain currently detected at the station." };
-}
-
-function assessRotation(pressureTrendInHgPerHr: number | null): ThreatFactor {
-  // Base reflectivity has no velocity information, so rotation cannot be detected from
-  // this app's radar feed. A sharp pressure fall is a loose supporting signal for storm
-  // intensification, but it is not a rotation indicator on its own. Until NWS alerts are
-  // wired in, this factor stays informational and never drives the overall level up.
-  const trendNote = pressureTrendInHgPerHr !== null && pressureTrendInHgPerHr <= -0.05
-    ? ` Local pressure is falling quickly (${pressureTrendInHgPerHr.toFixed(2)} inHg/hr), consistent with an intensifying storm nearby, though this does not confirm rotation.`
-    : "";
-  return {
-    category: "rotation",
-    level: "monitor",
-    headline: "Rotation: not assessed here",
-    detail: `This app's radar shows reflectivity only, which cannot detect rotation.${trendNote} For tornado risk, rely on active NWS Tornado Warnings.`,
-  };
-}
-
-export function assessThreat(input: ThreatInput): ThreatAssessment {
-  const wind = assessWind(input.windGustMph);
-  const hail = assessHail(input.radarDbz);
-  const heavyRain = assessHeavyRain(input.hourlyRainIn);
-  const rotation = assessRotation(input.pressureTrendInHgPerHr);
-
-  // Rotation is deliberately excluded from driving the overall level — see assessRotation.
-  const overallLevel = [wind, hail, heavyRain].reduce((level, factor) => higherLevel(level, factor.level), "none" as ThreatLevel);
-
-  return {
-    overallLevel,
-    factors: [wind, hail, heavyRain, rotation],
-    generatedAt: new Date().toISOString(),
-  };
-}
+export type ThreatCategory = "wind" | "hail" | "heavyRain" | "tornado" | "officialWarning";
+export type ThreatFactor = { category: ThreatCategory; level: ThreatLevel; headline: string; detail: string };
+export type ThreatAssessment = { overallLevel: ThreatLevel; factors: ThreatFactor[]; generatedAt: string };
+export type ThreatInput = { windGustMph:number|null; hourlyRainIn:number|null; radarDbz:number|null; pressureTrendInHgPerHr:number|null; alertsHere:NwsAlert[]; alertsNearby:NwsAlert[] };
+const RANK:Record<ThreatLevel,number>={none:0,monitor:1,elevated:2,severe:3};
+const higher=(a:ThreatLevel,b:ThreatLevel):ThreatLevel=>RANK[a]>=RANK[b]?a:b;
+function wind(v:number|null):ThreatFactor{if(v===null)return{category:"wind",level:"none",headline:"Wind: no data",detail:"Live gust reading is unavailable."};if(v>=58)return{category:"wind",level:"severe",headline:"Damaging wind gusts",detail:`Gusts to ${v.toFixed(0)} mph meet the severe-thunderstorm wind threshold.`};if(v>=40)return{category:"wind",level:"elevated",headline:"Strong, gusty wind",detail:`Gusts to ${v.toFixed(0)} mph.`};if(v>=25)return{category:"wind",level:"monitor",headline:"Breezy to gusty",detail:`Gusts to ${v.toFixed(0)} mph.`};return{category:"wind",level:"none",headline:"Wind: nominal",detail:`Gusts to ${v.toFixed(0)} mph.`}}
+function hail(v:number|null):ThreatFactor{if(v===null)return{category:"hail",level:"none",headline:"Hail: no radar data",detail:"Point reflectivity is unavailable."};if(v>=55)return{category:"hail",level:"severe",headline:"Large hail possible",detail:`Reflectivity ${v.toFixed(0)} dBZ indicates a very intense core; hail is possible, but reflectivity alone does not confirm hail.`};if(v>=50)return{category:"hail",level:"elevated",headline:"Hail possible",detail:`Reflectivity ${v.toFixed(0)} dBZ suggests a strong core.`};if(v>=45)return{category:"hail",level:"monitor",headline:"Strong core overhead",detail:`Reflectivity ${v.toFixed(0)} dBZ; heavy rain likely and small hail is possible.`};return{category:"hail",level:"none",headline:"Hail: unlikely",detail:v>0?`Reflectivity ${v.toFixed(0)} dBZ.`:"No significant echo overhead."}}
+function rain(v:number|null):ThreatFactor{if(v===null)return{category:"heavyRain",level:"none",headline:"Rain: no data",detail:"Live rain-rate reading is unavailable."};if(v>=2)return{category:"heavyRain",level:"severe",headline:"Very heavy rain",detail:`Station rain rate ${v.toFixed(2)} in/hr; gauge exposure can affect this reading.`};if(v>=1)return{category:"heavyRain",level:"elevated",headline:"Heavy rain",detail:`Station rain rate ${v.toFixed(2)} in/hr; gauge exposure can affect this reading.`};if(v>=.3)return{category:"heavyRain",level:"monitor",headline:"Moderate rain",detail:`Station rain rate ${v.toFixed(2)} in/hr.`};return{category:"heavyRain",level:"none",headline:"Rain: light or none",detail:v>0?`Rain rate ${v.toFixed(2)} in/hr.`:"No rain currently detected at the station."}}
+function tornado(h:NwsAlert[],n:NwsAlert[]):ThreatFactor{const here=h.find(a=>a.event==="Tornado Warning");if(here)return{category:"tornado",level:"severe",headline:"TORNADO WARNING for Bridgeport",detail:"An active NWS Tornado Warning includes the Bridgeport point. Follow official warning instructions and take shelter."};const near=n.find(a=>a.event==="Tornado Warning");if(near)return{category:"tornado",level:"elevated",headline:"Tornado Warning nearby",detail:`An active NWS Tornado Warning is nearby${near.approxDistanceMiles!==null?` (~${near.approxDistanceMiles.toFixed(0)} mi)`:""}, but does not currently include Bridgeport.`};const watch=h.find(a=>a.event==="Tornado Watch")||n.find(a=>a.event==="Tornado Watch");if(watch)return{category:"tornado",level:"monitor",headline:"Tornado Watch in the area",detail:"Conditions are favorable for tornadoes. Monitor official NWS warnings."};return{category:"tornado",level:"none",headline:"No active tornado warning",detail:"Reflectivity alone cannot detect rotation; tornado status comes from official NWS alerts."}}
+function official(h:NwsAlert[],n:NwsAlert[]):ThreatFactor{const events=new Set(["Severe Thunderstorm Warning","Flash Flood Warning"]);const here=h.find(a=>events.has(a.event));if(here)return{category:"officialWarning",level:"severe",headline:`${here.event} for Bridgeport`,detail:"An active official NWS warning includes the Bridgeport point."};const near=n.find(a=>events.has(a.event));if(near)return{category:"officialWarning",level:"elevated",headline:`${near.event} nearby`,detail:`An active warning is nearby${near.approxDistanceMiles!==null?` (~${near.approxDistanceMiles.toFixed(0)} mi)`:""} but does not currently include Bridgeport.`};const watch=h.find(a=>a.event==="Severe Thunderstorm Watch")||n.find(a=>a.event==="Severe Thunderstorm Watch");if(watch)return{category:"officialWarning",level:"monitor",headline:"Severe Thunderstorm Watch in the area",detail:"Conditions are favorable for severe thunderstorms."};return{category:"officialWarning",level:"none",headline:"No official severe warnings",detail:"No Tornado, Severe Thunderstorm, or Flash Flood Warning currently affects Bridgeport."}}
+export function assessThreat(i:ThreatInput):ThreatAssessment{const factors=[wind(i.windGustMph),hail(i.radarDbz),rain(i.hourlyRainIn),tornado(i.alertsHere,i.alertsNearby),official(i.alertsHere,i.alertsNearby)];return{overallLevel:factors.reduce((a,f)=>higher(a,f.level),"none" as ThreatLevel),factors,generatedAt:new Date().toISOString()}}
