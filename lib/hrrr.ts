@@ -1,12 +1,12 @@
 import "server-only";
+import { PNG } from "pngjs";
 
 const META_URL = "https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json";
-const HRRR_REFD_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi";
+const HRRR_REFP_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refp.cgi";
 
 export type HrrrPointSample = {
   forecastMinutes: number;
   precipitation: boolean | null;
-  reflectivity: number | null;
 };
 
 type IemMeta = { model_init_utc?: string };
@@ -32,56 +32,41 @@ export function hrrrForecastMinutesForTime(startTime: string, modelInitUtc: stri
   return Math.round(rawMinutes / 15) * 15;
 }
 
-function numericValue(text: string) {
-  const patterns = [
-    /(?:value|pixel|band1|gray_index)\s*[:=]\s*(-?\d+(?:\.\d+)?)/i,
-    /(-?\d+(?:\.\d+)?)\s*dBZ/i,
-  ];
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const value = Number(match[1]);
-      if (Number.isFinite(value)) return value;
-    }
-  }
-  return null;
-}
-
 export async function getHrrrPointSample(lat: number, lon: number, forecastMinutes: number): Promise<HrrrPointSample> {
-  const layer = `refd_${String(forecastMinutes).padStart(4, "0")}`;
-  const delta = 0.04;
+  const layer = `refp_${String(forecastMinutes).padStart(4, "0")}`;
+  const delta = 0.06;
+  const size = 31;
   const params = new URLSearchParams({
     SERVICE: "WMS",
     VERSION: "1.1.1",
-    REQUEST: "GetFeatureInfo",
+    REQUEST: "GetMap",
     LAYERS: layer,
-    QUERY_LAYERS: layer,
     STYLES: "",
+    FORMAT: "image/png",
+    TRANSPARENT: "true",
     SRS: "EPSG:4326",
     BBOX: `${lon - delta},${lat - delta},${lon + delta},${lat + delta}`,
-    WIDTH: "101",
-    HEIGHT: "101",
-    X: "50",
-    Y: "50",
-    INFO_FORMAT: "text/plain",
-    FEATURE_COUNT: "1",
+    WIDTH: String(size),
+    HEIGHT: String(size),
   });
 
   try {
-    const response = await fetch(`${HRRR_REFD_WMS}?${params.toString()}`, { next: { revalidate: 300 } });
-    if (!response.ok) return { forecastMinutes, precipitation: null, reflectivity: null };
-    const text = await response.text();
-    const lower = text.toLowerCase();
-    if (lower.includes("no results") || lower.includes("search returned no results") || lower.includes("no feature")) {
-      return { forecastMinutes, precipitation: false, reflectivity: null };
+    const response = await fetch(`${HRRR_REFP_WMS}?${params.toString()}`, { next: { revalidate: 300 } });
+    if (!response.ok || !(response.headers.get("content-type") ?? "").includes("image/png")) {
+      return { forecastMinutes, precipitation: null };
     }
-    const reflectivity = numericValue(text);
-    if (reflectivity !== null) {
-      return { forecastMinutes, precipitation: reflectivity >= 5, reflectivity };
+    const png = PNG.sync.read(Buffer.from(await response.arrayBuffer()));
+    const centerX = Math.floor(png.width / 2);
+    const centerY = Math.floor(png.height / 2);
+    let visiblePixels = 0;
+    for (let y = Math.max(0, centerY - 1); y <= Math.min(png.height - 1, centerY + 1); y += 1) {
+      for (let x = Math.max(0, centerX - 1); x <= Math.min(png.width - 1, centerX + 1); x += 1) {
+        const offset = (png.width * y + x) * 4;
+        if (png.data[offset + 3] > 24) visiblePixels += 1;
+      }
     }
-    const hasFeature = lower.includes("feature") || lower.includes("layer '") || lower.includes("layer \"");
-    return { forecastMinutes, precipitation: hasFeature ? true : null, reflectivity: null };
+    return { forecastMinutes, precipitation: visiblePixels > 0 };
   } catch {
-    return { forecastMinutes, precipitation: null, reflectivity: null };
+    return { forecastMinutes, precipitation: null };
   }
 }
