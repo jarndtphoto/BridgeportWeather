@@ -10,11 +10,40 @@ const tabs = [
 
 const REFRESH_THRESHOLD = 72;
 const MAX_PULL = 96;
+const TAB_STORAGE_KEY = "bsw-active-tab";
+
+function isKnownTab(id: string | null): id is (typeof tabs)[number][0] {
+  return tabs.some(([tabId]) => tabId === id);
+}
+
+function setActiveTab(id: string, scrollToTop = false) {
+  const input = document.getElementById(id) as HTMLInputElement | null;
+  if (!input) return;
+  input.checked = true;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  try {
+    window.sessionStorage.setItem(TAB_STORAGE_KEY, id);
+  } catch {}
+  document.documentElement.style.scrollBehavior = "auto";
+  document.body.style.scrollBehavior = "auto";
+  window.requestAnimationFrame(() => {
+    if (scrollToTop) window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    window.dispatchEvent(new Event("resize"));
+  });
+}
 
 export default function BottomNav() {
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const pullDistanceRef = useRef(0);
+
+  useEffect(() => {
+    let savedTab: string | null = null;
+    try {
+      savedTab = window.sessionStorage.getItem(TAB_STORAGE_KEY);
+    } catch {}
+    if (isKnownTab(savedTab)) setActiveTab(savedTab, false);
+  }, []);
 
   useEffect(() => {
     let startY: number | null = null;
@@ -59,6 +88,14 @@ export default function BottomNav() {
         reset();
         return;
       }
+
+      const active = tabs.find(([id]) => (document.getElementById(id) as HTMLInputElement | null)?.checked)?.[0];
+      if (active) {
+        try {
+          window.sessionStorage.setItem(TAB_STORAGE_KEY, active);
+        } catch {}
+      }
+
       setRefreshing(true);
       setPullDistance(REFRESH_THRESHOLD);
       window.setTimeout(() => window.location.reload(), 180);
@@ -78,16 +115,7 @@ export default function BottomNav() {
   }, [refreshing]);
 
   const changeTab = (id: string) => {
-    const input = document.getElementById(id) as HTMLInputElement | null;
-    if (!input) return;
-    input.checked = true;
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-    document.documentElement.style.scrollBehavior = "auto";
-    document.body.style.scrollBehavior = "auto";
-    window.requestAnimationFrame(() => {
-      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-      window.dispatchEvent(new Event("resize"));
-    });
+    setActiveTab(id, true);
   };
 
   const visible = refreshing || pullDistance > 8;
