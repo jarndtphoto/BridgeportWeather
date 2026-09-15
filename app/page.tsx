@@ -1,6 +1,7 @@
 import { getAmbientSnapshot, type AmbientSnapshot, type RawObservation } from "../lib/ambient";
 import { getLocalForecast, type LocalForecast } from "../lib/forecast";
 import RadarMap from "./components/RadarMap";
+import ForecastRadar from "./components/ForecastRadar";
 import ThreatBanner from "./components/ThreatBanner";
 import AlertsList from "./components/AlertsList";
 import BottomNav from "./components/BottomNav";
@@ -61,10 +62,8 @@ export default async function Home(){
           </article>)}
         </div>
         <section className="forecastRadarCard" aria-labelledby="forecast-radar-title">
-          <div><p className="kicker">MODEL GUIDANCE</p><h2 id="forecast-radar-title">6-Hour Forecast Radar</h2></div>
-          <strong>HRRR forecast reflectivity is next</strong>
-          <p>This will show modeled future precipitation and storm structure separately from the live NOAA radar, so forecast frames are never confused with observations.</p>
-          <span>NOAA HRRR · 3 km · updates hourly</span>
+          <div className="sectionTitle radarHeading"><div><p className="kicker">MODEL GUIDANCE</p><h2 id="forecast-radar-title">6-Hour Forecast Radar</h2></div><span>HRRR</span></div>
+          <ForecastRadar />
         </section>
         <div className="sectionTitle forecastOutlookTitle"><h3>Later outlook</h3><span>NWS</span></div>
         <div className="forecastOutlook">
