@@ -18,6 +18,9 @@ export type StormEvolution = {
   previousBridgeportDbz: number | null;
   sampledRadiusMiles: number;
   comparisonMinutes: number | null;
+  estimatedArrivalMinutes: number | null;
+  estimatedArrivalWindowMinutes: [number, number] | null;
+  closestApproachMiles: number | null;
 };
 
 const INNER_RADIUS_MILES = 4;
@@ -98,10 +101,40 @@ function motionPhrase(motion: StormMotion) {
   return "motion is uncertain";
 }
 
+function arrivalEstimate(
+  motion: StormMotion,
+  strongestRadiusMiles: number | null,
+  comparisonMinutes: number | null,
+): { estimatedArrivalMinutes: number | null; estimatedArrivalWindowMinutes: [number, number] | null; closestApproachMiles: number | null } {
+  if (strongestRadiusMiles === null) return { estimatedArrivalMinutes: null, estimatedArrivalWindowMinutes: null, closestApproachMiles: null };
+  if (motion === "approaching" && comparisonMinutes && comparisonMinutes > 0) {
+    const inferredRadialMph = ((OUTER_RADIUS_MILES - INNER_RADIUS_MILES) / comparisonMinutes) * 60;
+    if (inferredRadialMph >= 8 && inferredRadialMph <= 60) {
+      const estimate = Math.round((strongestRadiusMiles / inferredRadialMph) * 60);
+      const margin = Math.max(5, Math.round(estimate * 0.6));
+      return {
+        estimatedArrivalMinutes: estimate,
+        estimatedArrivalWindowMinutes: [Math.max(0, estimate - margin), estimate + margin],
+        closestApproachMiles: 0,
+      };
+    }
+  }
+  if (motion === "passingNearby") return { estimatedArrivalMinutes: null, estimatedArrivalWindowMinutes: null, closestApproachMiles: strongestRadiusMiles };
+  if (motion === "movingAway") return { estimatedArrivalMinutes: null, estimatedArrivalWindowMinutes: null, closestApproachMiles: strongestRadiusMiles };
+  return { estimatedArrivalMinutes: null, estimatedArrivalWindowMinutes: null, closestApproachMiles: null };
+}
+
+function arrivalPhrase(window: [number, number] | null, closestApproachMiles: number | null, motion: StormMotion) {
+  if (window) return `If the same inward motion persists, the core could reach Bridgeport in roughly ${window[0]}–${window[1]} minutes.`;
+  if (motion === "passingNearby" && closestApproachMiles !== null) return `The current radar signal suggests a closest approach around ${closestApproachMiles} miles from Bridgeport rather than a direct arrival.`;
+  if (motion === "movingAway" && closestApproachMiles !== null) return `The core is moving away; no Bridgeport arrival time is indicated. It is currently about ${closestApproachMiles} miles from the sampled centerline.`;
+  return "A reliable Bridgeport arrival or closest-approach time cannot be estimated from the current radar signal.";
+}
+
 export async function assessStormEvolution(lat: number, lon: number, frames: RadarFrame[], bridgeportDbz: number | null): Promise<StormEvolution> {
   const latest = frames[frames.length - 1] ?? null;
   if (!latest) {
-    return { trend: "unknown", motion: "unknown", relevance: "unknown", headline: "Storm evolution unavailable", detail: "Recent radar frames are unavailable.", strongestSector: null, strongestNearbyDbz: null, strongestRadiusMiles: null, bridgeportDbz, previousBridgeportDbz: null, sampledRadiusMiles: SAMPLE_RADIUS_MILES, comparisonMinutes: null };
+    return { trend: "unknown", motion: "unknown", relevance: "unknown", headline: "Storm evolution unavailable", detail: "Recent radar frames are unavailable.", strongestSector: null, strongestNearbyDbz: null, strongestRadiusMiles: null, bridgeportDbz, previousBridgeportDbz: null, sampledRadiusMiles: SAMPLE_RADIUS_MILES, comparisonMinutes: null, estimatedArrivalMinutes: null, estimatedArrivalWindowMinutes: null, closestApproachMiles: null };
   }
 
   const samples = await Promise.all(DIRECTIONS.flatMap((direction) => [INNER_RADIUS_MILES, OUTER_RADIUS_MILES].map(async (radiusMiles) => {
@@ -131,6 +164,8 @@ export async function assessStormEvolution(lat: number, lon: number, frames: Rad
   const localTrend = trendFromChange(bridgeportDbz, previousBridgeportDbz);
   const trend = bridgeportDbz !== null && bridgeportDbz >= 20 ? localTrend : nearbyTrend;
   const motion = strongest && prior ? motionFromRadialShift(currentInner, currentOuter, previousInner, previousOuter) : "unknown";
+  const comparisonMinutes = prior ? Math.round((latest.epochSeconds - prior.epochSeconds) / 60) : null;
+  const estimate = arrivalEstimate(motion, strongest?.radiusMiles ?? null, comparisonMinutes);
 
   let relevance: BridgeportRelevance = "quiet";
   let headline = "No significant storm core near Bridgeport";
@@ -148,7 +183,7 @@ export async function assessStormEvolution(lat: number, lon: number, frames: Rad
     relevance = "nearby";
     const motionLabel = motion === "approaching" ? "approaching" : motion === "movingAway" ? "moving away" : "nearby";
     headline = `Storm core ${strongest.label} of Bridgeport · ${motionLabel}`;
-    detail = `The strongest sampled echo is about ${strongest.radiusMiles} miles ${strongest.label} of Bridgeport at ${strongestNearbyDbz?.toFixed(0)} dBZ. Its intensity is ${trend}, and the 4-/8-mile ring changes ${motionPhrase(motion)}. This is a radar-based motion cue, not a track or arrival-time forecast.`;
+    detail = `The strongest sampled echo is about ${strongest.radiusMiles} miles ${strongest.label} of Bridgeport at ${strongestNearbyDbz?.toFixed(0)} dBZ. Its intensity is ${trend}, and the 4-/8-mile ring changes ${motionPhrase(motion)}. ${arrivalPhrase(estimate.estimatedArrivalWindowMinutes, estimate.closestApproachMiles, motion)} This is a coarse MRMS radial estimate, not a storm-track forecast.`;
   } else if (trend === "strengthening" || trend === "weakening") {
     headline = `Nearby echoes are ${trend}`;
     detail = `Nearby radar samples are ${trend}, but no significant core is currently over or immediately near Bridgeport.`;
@@ -166,6 +201,9 @@ export async function assessStormEvolution(lat: number, lon: number, frames: Rad
     bridgeportDbz,
     previousBridgeportDbz,
     sampledRadiusMiles: SAMPLE_RADIUS_MILES,
-    comparisonMinutes: prior ? Math.round((latest.epochSeconds - prior.epochSeconds) / 60) : null,
+    comparisonMinutes,
+    estimatedArrivalMinutes: estimate.estimatedArrivalMinutes,
+    estimatedArrivalWindowMinutes: estimate.estimatedArrivalWindowMinutes,
+    closestApproachMiles: estimate.closestApproachMiles,
   };
 }
