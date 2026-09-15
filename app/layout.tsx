@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./bright-theme.css";
 import "leaflet/dist/leaflet.css";
+import AppUpdateChecker from "./components/AppUpdateChecker";
 
 export const metadata: Metadata = {
   title: "Bridgeport Storm Watch",
@@ -30,5 +31,6 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}</body></html>;
+  const currentVersion = process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.VERCEL_DEPLOYMENT_ID ?? "development";
+  return <html lang="en"><body><AppUpdateChecker currentVersion={currentVersion}/>{children}</body></html>;
 }
