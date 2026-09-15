@@ -1,0 +1,13 @@
+:root{background:#102235;color:#f8fbff}
+body{background:linear-gradient(180deg,#1d3a56 0,#173149 38%,#102235 100%);color:#f8fbff}
+.eyebrow,.kicker{color:#b9d7ee}
+.live{color:#c7d9e8}.live.connected{color:#a9efc0}.live.connected i{background:#4fdb82;box-shadow:0 0 0 4px rgba(79,219,130,.18)}
+.threatZone,.emptyState{border-color:#486681;background:#25445f}.threatZone p,.emptyState p{color:#d2e2ef}
+.threatZone.threatLevel-monitor{border-color:#6d8c3f;background:#334c2a}.threatZone.threatLevel-elevated{border-color:#a17626;background:#5a431f}.threatZone.threatLevel-severe{border-color:#a63a4d;background:#5a2630}
+.threatFactorList li{background:rgba(255,255,255,.07)}.threatFactorList li span{color:#d2e2ef}
+.sectionTitle span{color:#abc5d9}.radarFreshness.ready{color:#98efb6}.radarFreshness.loading{color:#ffd275}.radarFreshness.error{color:#ff9bac}
+.radarShell{border-color:#55748f;background:#26445e}.radarMap{background:#2a4d69}.radarReadout{border-color:rgba(255,255,255,.28);background:rgba(18,38,56,.9)}.radarReadout span{color:#d0deea}
+.radarControls button{border-color:#587691;background:#294b68;color:#fff}.radarControls input{accent-color:#56c8ff}.radarSource{color:#a9c3d7}.radarError{color:#ffafbc}
+.leaflet-control-zoom a{background:#2b4e6a!important;color:#fff!important;border-color:#66839b!important}.leaflet-control-attribution{background:rgba(22,45,64,.85)!important;color:#d1e0eb!important}.leaflet-control-attribution a{color:#fff!important}
+.stationMeta{color:#bad0e1}.metric{border-color:#4d6a83;background:#24445f;box-shadow:0 8px 22px rgba(2,18,31,.16)}.metric span{color:#bfd5e6}.metric strong{color:#fff}.metric small{color:#d2e1ec}.note{color:#a9c1d4}
+.bottomNav{border-top-color:rgba(255,255,255,.14);background:rgba(21,43,62,.94)}.bottomNav label{border-color:#54718a;color:#c5d8e8;background:#294860}#tab-radar:checked~.bottomNav label[for=tab-radar],#tab-station:checked~.bottomNav label[for=tab-station],#tab-forecast:checked~.bottomNav label[for=tab-forecast]{background:#6ed0ff;color:#092338;border-color:#6ed0ff}
