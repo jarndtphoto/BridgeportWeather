@@ -2,16 +2,15 @@
 
 import type * as Leaflet from "leaflet";
 import type { Map as LeafletMap, TileLayer } from "leaflet";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
 const HRRR_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi";
-const FORECAST_MINUTES = [0, 60, 120, 180, 240, 300, 360];
 
 type MetaPayload = { modelInitUtc: string | null };
 
 function validTimeLabel(modelInitUtc: string | null, forecastMinutes: number) {
-  if (!modelInitUtc) return forecastMinutes === 0 ? "Model analysis" : `+${forecastMinutes / 60} hr`;
+  if (!modelInitUtc) return forecastMinutes === 0 ? "Model analysis" : `Forecast +${forecastMinutes / 60} hr`;
   const valid = new Date(Date.parse(modelInitUtc) + forecastMinutes * 60_000);
   return new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Chicago",
@@ -48,6 +47,18 @@ export default function ForecastRadar() {
       .catch(() => setModelInitUtc(null));
   }, []);
 
+  const forecastMinutes = useMemo(() => {
+    if (!modelInitUtc) return [0, 60, 120, 180, 240, 300, 360];
+    const initMs = Date.parse(modelInitUtc);
+    const ageHours = Math.max(0, Math.ceil((Date.now() - initMs) / 3_600_000));
+    const startMinutes = Math.min(ageHours * 60, 720);
+    return Array.from({ length: 7 }, (_, index) => startMinutes + index * 60);
+  }, [modelInitUtc]);
+
+  useEffect(() => {
+    setFrameIndex(0);
+  }, [modelInitUtc]);
+
   useEffect(() => {
     let active = true;
     void import("leaflet").then((module) => {
@@ -82,8 +93,8 @@ export default function ForecastRadar() {
     const L = leafletRef.current;
     if (!map || !L || !mapReady) return;
 
-    const forecastMinutes = FORECAST_MINUTES[frameIndex];
-    const layerName = `refd_${String(forecastMinutes).padStart(4, "0")}`;
+    const frameMinutes = forecastMinutes[frameIndex];
+    const layerName = `refd_${String(frameMinutes).padStart(4, "0")}`;
     const previous = layerRef.current;
     const next = L.tileLayer.wms(HRRR_WMS, {
       layers: layerName,
@@ -95,25 +106,26 @@ export default function ForecastRadar() {
     } as L.WMSOptions).addTo(map);
     layerRef.current = next;
     if (previous && map.hasLayer(previous)) map.removeLayer(previous);
-  }, [frameIndex, mapReady]);
+  }, [forecastMinutes, frameIndex, mapReady]);
 
   useEffect(() => {
     if (!playing) return;
     const timer = window.setInterval(() => {
-      setFrameIndex((index) => (index + 1) % FORECAST_MINUTES.length);
+      setFrameIndex((index) => (index + 1) % forecastMinutes.length);
     }, 1700);
     return () => window.clearInterval(timer);
-  }, [playing]);
+  }, [forecastMinutes.length, playing]);
 
-  const forecastMinutes = FORECAST_MINUTES[frameIndex];
+  const frameMinutes = forecastMinutes[frameIndex];
+  const relativeHours = frameIndex;
 
   return (
     <div className="forecastRadarPlayer">
       <div className="radarShell forecastRadarShell">
         <div ref={containerRef} className="radarMap forecastRadarMap" aria-label="HRRR six-hour simulated reflectivity forecast centered on Bridgeport, Chicago" />
         <div className="radarReadout" aria-live="polite">
-          <strong>{validTimeLabel(modelInitUtc, forecastMinutes)}</strong>
-          <span>{forecastMinutes === 0 ? "HRRR analysis" : `HRRR +${forecastMinutes / 60} hr`} · {runLabel(modelInitUtc)}</span>
+          <strong>{validTimeLabel(modelInitUtc, frameMinutes)}</strong>
+          <span>{relativeHours === 0 ? "First future HRRR hour" : `+${relativeHours} hr from start`} · HRRR F+{frameMinutes / 60} · {runLabel(modelInitUtc)}</span>
         </div>
       </div>
       <div className="radarControls">
@@ -123,7 +135,7 @@ export default function ForecastRadar() {
         <input
           type="range"
           min="0"
-          max={FORECAST_MINUTES.length - 1}
+          max={forecastMinutes.length - 1}
           value={frameIndex}
           onChange={(event) => {
             setPlaying(false);
@@ -136,9 +148,9 @@ export default function ForecastRadar() {
           className="newestButton"
           onClick={() => {
             setPlaying(false);
-            setFrameIndex(FORECAST_MINUTES.length - 1);
+            setFrameIndex(forecastMinutes.length - 1);
           }}
-          disabled={frameIndex === FORECAST_MINUTES.length - 1 && !playing}
+          disabled={frameIndex === forecastMinutes.length - 1 && !playing}
         >
           +6 hr
         </button>
