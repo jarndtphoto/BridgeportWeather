@@ -2,22 +2,27 @@ import "server-only";
 import { getRadarPointReflectivity, type RadarFrame } from "./radar";
 
 export type StormTrend = "strengthening" | "steady" | "weakening" | "quiet" | "unknown";
+export type StormMotion = "approaching" | "movingAway" | "passingNearby" | "stationaryOrUnclear" | "unknown";
 export type BridgeportRelevance = "overhead" | "nearby" | "quiet" | "unknown";
 
 export type StormEvolution = {
   trend: StormTrend;
+  motion: StormMotion;
   relevance: BridgeportRelevance;
   headline: string;
   detail: string;
   strongestSector: string | null;
   strongestNearbyDbz: number | null;
+  strongestRadiusMiles: number | null;
   bridgeportDbz: number | null;
   previousBridgeportDbz: number | null;
   sampledRadiusMiles: number;
   comparisonMinutes: number | null;
 };
 
-const SAMPLE_RADIUS_MILES = 8;
+const INNER_RADIUS_MILES = 4;
+const OUTER_RADIUS_MILES = 8;
+const SAMPLE_RADIUS_MILES = OUTER_RADIUS_MILES;
 const DIRECTIONS = [
   { label: "N", bearing: 0 },
   { label: "NE", bearing: 45 },
@@ -64,36 +69,72 @@ function trendFromChange(latest: number | null, previous: number | null): StormT
   return "steady";
 }
 
+function motionFromRadialShift(currentInner: number | null, currentOuter: number | null, previousInner: number | null, previousOuter: number | null): StormMotion {
+  if ([currentInner, currentOuter, previousInner, previousOuter].some((value) => value === null)) return "unknown";
+  const ci = currentInner as number;
+  const co = currentOuter as number;
+  const pi = previousInner as number;
+  const po = previousOuter as number;
+  const currentSignificant = Math.max(ci, co) >= 30;
+  const previousSignificant = Math.max(pi, po) >= 30;
+  if (!currentSignificant && !previousSignificant) return "stationaryOrUnclear";
+
+  const innerChange = ci - pi;
+  const outerChange = co - po;
+  const inwardShift = innerChange >= 7 && ci >= 25 && innerChange >= outerChange + 5;
+  const outwardShift = outerChange >= 7 && co >= 25 && outerChange >= innerChange + 5;
+
+  if (inwardShift) return "approaching";
+  if (outwardShift) return "movingAway";
+  if (ci >= 30 || co >= 30) return "passingNearby";
+  return "stationaryOrUnclear";
+}
+
+function motionPhrase(motion: StormMotion) {
+  if (motion === "approaching") return "appears to be approaching Bridgeport";
+  if (motion === "movingAway") return "appears to be moving away from Bridgeport";
+  if (motion === "passingNearby") return "is passing nearby; approach is not confirmed";
+  if (motion === "stationaryOrUnclear") return "has no clear toward/away motion signal";
+  return "motion is uncertain";
+}
+
 export async function assessStormEvolution(lat: number, lon: number, frames: RadarFrame[], bridgeportDbz: number | null): Promise<StormEvolution> {
   const latest = frames[frames.length - 1] ?? null;
   if (!latest) {
-    return { trend: "unknown", relevance: "unknown", headline: "Storm evolution unavailable", detail: "Recent radar frames are unavailable.", strongestSector: null, strongestNearbyDbz: null, bridgeportDbz, previousBridgeportDbz: null, sampledRadiusMiles: SAMPLE_RADIUS_MILES, comparisonMinutes: null };
+    return { trend: "unknown", motion: "unknown", relevance: "unknown", headline: "Storm evolution unavailable", detail: "Recent radar frames are unavailable.", strongestSector: null, strongestNearbyDbz: null, strongestRadiusMiles: null, bridgeportDbz, previousBridgeportDbz: null, sampledRadiusMiles: SAMPLE_RADIUS_MILES, comparisonMinutes: null };
   }
 
-  const samples = await Promise.all(DIRECTIONS.map(async (direction) => {
-    const point = destinationPoint(lat, lon, direction.bearing, SAMPLE_RADIUS_MILES);
+  const samples = await Promise.all(DIRECTIONS.flatMap((direction) => [INNER_RADIUS_MILES, OUTER_RADIUS_MILES].map(async (radiusMiles) => {
+    const point = destinationPoint(lat, lon, direction.bearing, radiusMiles);
     const dbz = await getRadarPointReflectivity(point.lat, point.lon, latest.observedAt);
-    return { ...direction, ...point, dbz };
-  }));
+    return { ...direction, ...point, radiusMiles, dbz };
+  })));
 
   const valid = samples.filter((sample): sample is typeof sample & { dbz: number } => sample.dbz !== null && Number.isFinite(sample.dbz));
   const strongest = valid.reduce<(typeof valid)[number] | null>((best, sample) => !best || sample.dbz > best.dbz ? sample : best, null);
   const prior = previousFrame(frames, latest);
-  const [previousStrongestDbz, previousBridgeportDbz] = prior
+  const sectorSamples = strongest ? samples.filter((sample) => sample.label === strongest.label) : [];
+  const currentInner = sectorSamples.find((sample) => sample.radiusMiles === INNER_RADIUS_MILES)?.dbz ?? null;
+  const currentOuter = sectorSamples.find((sample) => sample.radiusMiles === OUTER_RADIUS_MILES)?.dbz ?? null;
+
+  const [previousInner, previousOuter, previousBridgeportDbz] = prior && strongest
     ? await Promise.all([
-        strongest ? getRadarPointReflectivity(strongest.lat, strongest.lon, prior.observedAt) : Promise.resolve(null),
+        getRadarPointReflectivity(destinationPoint(lat, lon, strongest.bearing, INNER_RADIUS_MILES).lat, destinationPoint(lat, lon, strongest.bearing, INNER_RADIUS_MILES).lon, prior.observedAt),
+        getRadarPointReflectivity(destinationPoint(lat, lon, strongest.bearing, OUTER_RADIUS_MILES).lat, destinationPoint(lat, lon, strongest.bearing, OUTER_RADIUS_MILES).lon, prior.observedAt),
         getRadarPointReflectivity(lat, lon, prior.observedAt),
       ])
-    : [null, null];
+    : [null, null, prior ? await getRadarPointReflectivity(lat, lon, prior.observedAt) : null];
 
   const strongestNearbyDbz = strongest?.dbz ?? null;
+  const previousStrongestDbz = strongest?.radiusMiles === INNER_RADIUS_MILES ? previousInner : previousOuter;
   const nearbyTrend = trendFromChange(strongestNearbyDbz, previousStrongestDbz);
   const localTrend = trendFromChange(bridgeportDbz, previousBridgeportDbz);
   const trend = bridgeportDbz !== null && bridgeportDbz >= 20 ? localTrend : nearbyTrend;
+  const motion = strongest && prior ? motionFromRadialShift(currentInner, currentOuter, previousInner, previousOuter) : "unknown";
 
   let relevance: BridgeportRelevance = "quiet";
   let headline = "No significant storm core near Bridgeport";
-  let detail = "Radar sampling shows no significant echo over Bridgeport or at the nearby 8-mile ring.";
+  let detail = "Radar sampling shows no significant echo over Bridgeport or on the nearby 4- and 8-mile rings.";
 
   if (bridgeportDbz === null && strongestNearbyDbz === null) {
     relevance = "unknown";
@@ -105,8 +146,9 @@ export async function assessStormEvolution(lat: number, lon: number, frames: Rad
     detail = `Reflectivity at Bridgeport is ${bridgeportDbz?.toFixed(0)} dBZ. Recent radar samples suggest the local echo is ${trend}.`;
   } else if ((strongestNearbyDbz ?? 0) >= 30 && strongest) {
     relevance = "nearby";
-    headline = `Nearby storm core ${strongest.label} of Bridgeport · ${trend}`;
-    detail = `The strongest sampled echo about ${SAMPLE_RADIUS_MILES} miles ${strongest.label} of Bridgeport is ${strongestNearbyDbz?.toFixed(0)} dBZ. Its sampled intensity is ${trend}; reflectivity alone does not confirm that it is moving toward Bridgeport.`;
+    const motionLabel = motion === "approaching" ? "approaching" : motion === "movingAway" ? "moving away" : "nearby";
+    headline = `Storm core ${strongest.label} of Bridgeport · ${motionLabel}`;
+    detail = `The strongest sampled echo is about ${strongest.radiusMiles} miles ${strongest.label} of Bridgeport at ${strongestNearbyDbz?.toFixed(0)} dBZ. Its intensity is ${trend}, and the 4-/8-mile ring changes ${motionPhrase(motion)}. This is a radar-based motion cue, not a track or arrival-time forecast.`;
   } else if (trend === "strengthening" || trend === "weakening") {
     headline = `Nearby echoes are ${trend}`;
     detail = `Nearby radar samples are ${trend}, but no significant core is currently over or immediately near Bridgeport.`;
@@ -114,11 +156,13 @@ export async function assessStormEvolution(lat: number, lon: number, frames: Rad
 
   return {
     trend,
+    motion,
     relevance,
     headline,
     detail,
     strongestSector: strongest?.label ?? null,
     strongestNearbyDbz,
+    strongestRadiusMiles: strongest?.radiusMiles ?? null,
     bridgeportDbz,
     previousBridgeportDbz,
     sampledRadiusMiles: SAMPLE_RADIUS_MILES,
