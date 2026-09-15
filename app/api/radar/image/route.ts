@@ -23,7 +23,7 @@ export async function GET(request: Request) {
   if (!bbox || !width || !height || !time) return Response.json({ error: "Invalid radar image request." }, { status: 400 });
 
   const url = new URL(radarWmsUrl());
-  url.search = new URLSearchParams({ service: "WMS", version: "1.1.1", request: "GetMap", layers: RADAR_LAYER, styles: "", format: "image/png", transparent: "true", srs: "EPSG:3857", bbox, width, height, time }).toString();
+  url.search = new URLSearchParams({ service: "WMS", version: "1.1.1", request: "GetMap", layers: RADAR_LAYER, styles: "radar_reflectivity", format: "image/png", transparent: "true", srs: "EPSG:3857", bbox, width, height, time }).toString();
   try {
     const response = await fetch(url, { next: { revalidate: 300 } });
     if (!response.ok) throw new Error("NOAA radar image unavailable");
