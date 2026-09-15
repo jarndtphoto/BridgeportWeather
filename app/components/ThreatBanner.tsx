@@ -45,7 +45,7 @@ export default function ThreatBanner() {
     return (
       <div className="threatZone">
         <strong>Checking local conditions…</strong>
-        <p>Combining live station data, radar evolution, and official NWS alerts to assess current severe-weather threats.</p>
+        <p>Combining live station data, radar evolution, and official NWS alerts.</p>
       </div>
     );
   }
@@ -59,16 +59,16 @@ export default function ThreatBanner() {
     );
   }
 
-  const activeFactors = assessment.factors.filter((factor) => factor.level !== "none");
+  const authoritativeFactors = assessment.factors.filter(
+    (factor) => factor.level !== "none" && ["officialWarning", "tornado", "probSevere"].includes(factor.category),
+  );
 
   return (
     <div className={`threatZone threatLevel-${assessment.overallLevel}`}>
       <strong>{LEVEL_COPY[assessment.overallLevel]}</strong>
-      {activeFactors.length === 0 ? (
-        <p>Official alerts and local severe-weather indicators are currently quiet for Bridgeport.</p>
-      ) : (
+      {authoritativeFactors.length > 0 && (
         <ul className="threatFactorList">
-          {activeFactors.map((factor) => (
+          {authoritativeFactors.map((factor) => (
             <li key={factor.category} className={`threatFactor-${factor.level}`}>
               <strong>{factor.headline}</strong>
               <span>{factor.detail}</span>
@@ -76,12 +76,14 @@ export default function ThreatBanner() {
           ))}
         </ul>
       )}
-      {evolution && (
+      {evolution ? (
         <div className="stormEvolution">
           <strong>{evolution.headline}</strong>
           <p>{evolution.detail}</p>
         </div>
-      )}
+      ) : authoritativeFactors.length === 0 ? (
+        <p>Official alerts and local severe-weather indicators are currently quiet for Bridgeport.</p>
+      ) : null}
     </div>
   );
 }
