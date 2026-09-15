@@ -6,6 +6,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
 const HRRR_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi";
+const BASEMAP = "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png";
+const LABELS = "https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png";
+const CARTO_ATTRIBUTION = "&copy; OpenStreetMap contributors &copy; CARTO";
 
 type MetaPayload = { modelInitUtc: string | null };
 
@@ -57,10 +60,17 @@ export default function ForecastRadar() {
       const L = module.default;
       leafletRef.current = L;
       const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(LOCAL_TARGET, 8);
+      map.createPane("weather");
+      map.getPane("weather")!.style.zIndex = "400";
+      map.getPane("weather")!.style.pointerEvents = "none";
+      map.createPane("weatherLabels");
+      map.getPane("weatherLabels")!.style.zIndex = "550";
+      map.getPane("weatherLabels")!.style.pointerEvents = "none";
       const isTouch = window.matchMedia("(pointer: coarse)").matches;
       if (isTouch) map.dragging.disable();
       setTouchMap(isTouch);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+      L.tileLayer(BASEMAP, { maxZoom: 20, subdomains: "abcd", attribution: CARTO_ATTRIBUTION }).addTo(map);
+      L.tileLayer(LABELS, { maxZoom: 20, subdomains: "abcd", pane: "weatherLabels", attribution: CARTO_ATTRIBUTION }).addTo(map);
       L.circleMarker(LOCAL_TARGET, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d67", fillOpacity: 1 }).bindTooltip("Bridgeport", { direction: "top" }).addTo(map);
       map.on("moveend zoomend", () => setViewRevision((value) => value + 1));
       mapRef.current = map;
@@ -108,8 +118,9 @@ export default function ForecastRadar() {
     const ne = L.CRS.EPSG3857.project(bounds.getNorthEast());
     const size = map.getSize();
     if (size.x < 100 || size.y < 100) return;
-    const width = Math.max(640, Math.min(1400, Math.round(size.x * 2)));
-    const height = Math.max(640, Math.min(1400, Math.round(size.y * 2)));
+    const scale = Math.max(1, Math.min(3, 1800 / size.x, 1800 / size.y));
+    const width = Math.round(size.x * scale);
+    const height = Math.round(size.y * scale);
     const params = new URLSearchParams({
       SERVICE: "WMS",
       VERSION: "1.1.1",
@@ -125,23 +136,20 @@ export default function ForecastRadar() {
     });
     const url = `${HRRR_WMS}?${params.toString()}`;
     const previous = overlayRef.current;
-    const next = L.imageOverlay(url, bounds, { opacity: 0, zIndex: 400, interactive: false }).addTo(map);
+    const next = L.imageOverlay(url, bounds, { opacity: 0, pane: "weather", interactive: false }).addTo(map);
 
     let promoted = false;
     const promote = () => {
       if (promoted) return;
       promoted = true;
-      next.setOpacity(0.72);
+      next.setOpacity(0.62);
       overlayRef.current = next;
       if (previous && previous !== next && map.hasLayer(previous)) map.removeLayer(previous);
     };
-    const discard = () => {
-      if (map.hasLayer(next)) map.removeLayer(next);
-    };
+    const discard = () => { if (map.hasLayer(next)) map.removeLayer(next); };
 
     next.once("load", promote);
     next.once("error", discard);
-
     return () => {
       next.off("load", promote);
       next.off("error", discard);
@@ -173,6 +181,6 @@ export default function ForecastRadar() {
       <input type="range" min="0" max={forecastMinutes.length - 1} value={frameIndex} onChange={(event) => { setPlaying(false); setFrameIndex(Number(event.target.value)); }} aria-label="HRRR forecast hour" />
       <button type="button" className="newestButton" onClick={() => { setPlaying(false); setFrameIndex(forecastMinutes.length - 1); }} disabled={frameIndex === forecastMinutes.length - 1 && !playing}>+6 hr</button>
     </div>
-    <p className="radarSource">NCEP HRRR simulated reflectivity at 1 km AGL via Iowa Environmental Mesonet · model guidance, not observed radar</p>
+    <p className="radarSource">NCEP HRRR simulated reflectivity at 1 km AGL via Iowa Environmental Mesonet · high-resolution rendering of model guidance, not observed radar</p>
   </div>;
 }
