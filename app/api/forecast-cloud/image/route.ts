@@ -120,7 +120,7 @@ export async function GET(request: Request) {
     }
 
     const buffer = PNG.sync.write(png);
-    return new Response(buffer, {
+    return new Response(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "image/png",
         "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
