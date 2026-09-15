@@ -14,11 +14,10 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/api/app-icon?size=192", sizes: "192x192", type: "image/png" },
-      { url: "/api/app-icon?size=512", sizes: "512x512", type: "image/png" },
+      { url: "/api/app-icon?v=2", type: "image/jpeg" },
     ],
     apple: [
-      { url: "/api/app-icon?size=180", sizes: "180x180", type: "image/png" },
+      { url: "/api/app-icon?v=2", type: "image/jpeg" },
     ],
   },
 };
