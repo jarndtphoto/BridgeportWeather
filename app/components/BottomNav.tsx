@@ -7,36 +7,25 @@ const tabs = [
 ] as const;
 
 export default function BottomNav() {
-  const snapToTop = () => {
+  const changeTab = (id: string) => {
+    const input = document.getElementById(id) as HTMLInputElement | null;
+    if (!input) return;
+    input.checked = true;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
     document.documentElement.style.scrollBehavior = "auto";
     document.body.style.scrollBehavior = "auto";
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-    window.scrollTo(0, 0);
-  };
-
-  const finishTabChange = () => {
-    snapToTop();
     window.requestAnimationFrame(() => {
-      snapToTop();
-      window.requestAnimationFrame(() => {
-        snapToTop();
-        window.dispatchEvent(new Event("resize"));
-      });
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      window.dispatchEvent(new Event("resize"));
     });
   };
 
   return (
     <nav className="bottomNav" aria-label="Primary">
       {tabs.map(([id, label]) => (
-        <label
-          key={id}
-          htmlFor={id}
-          onPointerDown={snapToTop}
-          onClick={finishTabChange}
-        >
+        <button key={id} type="button" className="bottomNavButton" onClick={() => changeTab(id)}>
           {label}
-        </label>
+        </button>
       ))}
     </nav>
   );
