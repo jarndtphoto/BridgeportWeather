@@ -7,6 +7,7 @@ type IconKind =
   | "light-rain"
   | "rain"
   | "heavy-rain"
+  | "chance-thunderstorms"
   | "thunderstorms"
   | "severe-storms"
   | "snow"
@@ -20,19 +21,20 @@ type IconKind =
   | "partly-cloudy-night"
   | "mostly-cloudy-night";
 
-export function forecastIconKind(shortForecast: string, iconUrl: string | null): IconKind {
+export function forecastIconKind(shortForecast: string, iconUrl: string | null, precipitationChance: number | null = null): IconKind {
   const text = shortForecast.toLowerCase();
   const night = iconUrl?.includes("/night/") ?? false;
+  const probabilistic = text.includes("chance") || text.includes("likely") || text.includes("possible") || text.includes("isolated") || text.includes("scattered");
   if (text.includes("severe") && (text.includes("storm") || text.includes("thunder"))) return "severe-storms";
-  if (text.includes("thunder")) return "thunderstorms";
+  if (text.includes("thunder")) return probabilistic ? "chance-thunderstorms" : "thunderstorms";
   if (text.includes("freezing rain")) return "freezing-rain";
   if (text.includes("sleet")) return "sleet";
   if (text.includes("wintry") || (text.includes("snow") && text.includes("rain"))) return "wintry-mix";
   if (text.includes("blowing snow")) return "blowing-snow";
   if (text.includes("snow")) return "snow";
   if (text.includes("heavy rain") || text.includes("heavy showers")) return "heavy-rain";
-  if (text.includes("light rain") || text.includes("drizzle") || text.includes("slight chance") && text.includes("rain")) return "light-rain";
-  if (text.includes("rain") || text.includes("showers")) return "rain";
+  if (text.includes("light rain") || text.includes("drizzle") || (text.includes("slight chance") && text.includes("rain"))) return "light-rain";
+  if (text.includes("rain") || text.includes("showers")) return precipitationChance !== null && precipitationChance < 40 ? "light-rain" : "rain";
   if (text.includes("fog") || text.includes("haze") || text.includes("mist")) return "fog";
   if (text.includes("windy") || text.includes("breezy")) return "windy";
   if (text.includes("overcast")) return "overcast";
@@ -82,6 +84,7 @@ export default function WeatherIcon({ kind, className = "" }: { kind: IconKind; 
     {kind === "partly-cloudy-night" && <Cloud x={23} y={43} scale={.9}/>} 
     {kind === "mostly-cloudy-night" && <><Cloud dark x={32} y={33} scale={.8}/><Cloud dark x={13} y={45} scale={.95}/></>}
 
+    {kind === "chance-thunderstorms" && <><Cloud x={13} y={30} scale={1.02}/><path d="M59 58 51 72h8l-5 13 16-20h-8l6-7Z" fill="#ffd41f" stroke="#ffad00" strokeWidth="1.2"/><Drops count={2}/></>}
     {["light-rain","rain","heavy-rain","thunderstorms","severe-storms"].includes(kind) && <Cloud dark={cloudDark} x={12} y={26} scale={1.05}/>} 
     {kind === "light-rain" && <Drops count={2}/>} 
     {kind === "rain" && <Drops count={4}/>} 
