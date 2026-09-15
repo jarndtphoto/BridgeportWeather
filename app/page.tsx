@@ -5,6 +5,7 @@ import ForecastRadar from "./components/ForecastRadar";
 import ThreatBanner from "./components/ThreatBanner";
 import AlertsList from "./components/AlertsList";
 import BottomNav from "./components/BottomNav";
+import WeatherIcon, { forecastIconKind } from "./components/WeatherIcon";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +58,7 @@ export default async function Home(){
         <div className="forecastHours">
           {nextSix.map(period=><article className="forecastHour" key={period.startTime}>
             <span className="forecastHourTime">{forecastTime(period.startTime)}</span>
-            {period.icon&&<img className="forecastHourIcon" src={period.icon} alt="" aria-hidden="true" loading="lazy"/>}
+            <WeatherIcon className="forecastHourIcon" kind={forecastIconKind(period.shortForecast, period.icon)} />
             <strong>{period.temperature}°</strong>
             <span>{period.shortForecast}</span>
             <small>{period.precipitationChance===null?"Rain chance —":`${period.precipitationChance}% rain`}</small>
