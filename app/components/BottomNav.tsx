@@ -1,9 +1,9 @@
 "use client";
 
 const tabs = [
-  ["tab-radar", "Radar"],
-  ["tab-station", "Current"],
-  ["tab-forecast", "Forecast"],
+  ["tab-radar", "Live Radar"],
+  ["tab-station", "Current Conditions"],
+  ["tab-forecast", "Forecasted Weather"],
 ] as const;
 
 export default function BottomNav() {
