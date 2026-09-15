@@ -1,5 +1,6 @@
 import { getAmbientSnapshot, type AmbientSnapshot, type RawObservation } from "../lib/ambient";
 import RadarMap from "./components/RadarMap";
+import ThreatBanner from "./components/ThreatBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -63,10 +64,7 @@ export default async function Home() {
 
       <section className="tabPanel radarPanel" aria-labelledby="radar-title">
         <h1 id="radar-title">Bridgeport Severe Weather</h1>
-        <div className="threatZone">
-          <strong>No active severe-weather assessment</strong>
-          <p>Live radar and local observations are available. Automated severe-weather interpretation is not active yet.</p>
-        </div>
+        <ThreatBanner />
         <RadarMap />
       </section>
 
