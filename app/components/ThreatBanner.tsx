@@ -13,6 +13,9 @@ const LEVEL_COPY: Record<ThreatLevel, string> = {
   severe: "Severe threat indicators",
 };
 
+const STATION_DRY_COPY = "The local station has not measured rain yet.";
+const STATION_LIGHT_RAIN_COPY = "The local station may not detect drizzle or light rain.";
+
 export default function ThreatBanner() {
   const [assessment, setAssessment] = useState<ThreatAssessment | null>(null);
   const [evolution, setEvolution] = useState<StormEvolution | null>(null);
@@ -62,6 +65,7 @@ export default function ThreatBanner() {
   const authoritativeFactors = assessment.factors.filter(
     (factor) => factor.level !== "none" && ["officialWarning", "tornado", "probSevere"].includes(factor.category),
   );
+  const evolutionDetail = evolution?.detail.replace(STATION_DRY_COPY, STATION_LIGHT_RAIN_COPY);
 
   return (
     <div className={`threatZone threatLevel-${assessment.overallLevel}`}>
@@ -79,7 +83,7 @@ export default function ThreatBanner() {
       {evolution ? (
         <div className="stormEvolution">
           <strong>{evolution.headline}</strong>
-          <p>{evolution.detail}</p>
+          <p>{evolutionDetail}</p>
         </div>
       ) : authoritativeFactors.length === 0 ? (
         <p>Official alerts and local severe-weather indicators are currently quiet for Bridgeport.</p>
