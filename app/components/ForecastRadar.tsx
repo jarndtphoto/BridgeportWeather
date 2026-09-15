@@ -25,7 +25,7 @@ function runLabel(modelInitUtc: string | null) {
 }
 
 function relativeLabel(minutes: number) {
-  if (minutes === 0) return "Start";
+  if (minutes === 0) return "Current";
   const hours = Math.floor(minutes / 60);
   const remaining = minutes % 60;
   if (!hours) return `+${remaining} min`;
@@ -45,7 +45,7 @@ export default function ForecastRadar() {
   const leafletRef = useRef<typeof Leaflet | null>(null);
   const overlayRef = useRef<ImageOverlay | null>(null);
   const [frameIndex, setFrameIndex] = useState(0);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [modelInitUtc, setModelInitUtc] = useState<string | null>(null);
   const [touchMap, setTouchMap] = useState(false);
@@ -63,12 +63,15 @@ export default function ForecastRadar() {
     const frameCount = FORECAST_WINDOW_MINUTES / FORECAST_STEP_MINUTES + 1;
     if (!modelInitUtc) return Array.from({ length: frameCount }, (_, index) => index * FORECAST_STEP_MINUTES);
     const initMs = Date.parse(modelInitUtc);
-    const ageMinutes = Math.max(0, Math.ceil((Date.now() - initMs) / (FORECAST_STEP_MINUTES * 60_000)) * FORECAST_STEP_MINUTES);
+    const ageMinutes = Math.max(0, Math.floor((Date.now() - initMs) / (FORECAST_STEP_MINUTES * 60_000)) * FORECAST_STEP_MINUTES);
     const startMinutes = Math.min(ageMinutes, 720);
     return Array.from({ length: frameCount }, (_, index) => startMinutes + index * FORECAST_STEP_MINUTES);
   }, [modelInitUtc]);
 
-  useEffect(() => { setFrameIndex(0); }, [modelInitUtc]);
+  useEffect(() => {
+    setFrameIndex(0);
+    setPlaying(false);
+  }, [modelInitUtc]);
 
   useEffect(() => {
     let active = true;
@@ -187,7 +190,7 @@ export default function ForecastRadar() {
     <div className="radarShell forecastRadarShell">
       <div ref={containerRef} className={`radarMap forecastRadarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label="HRRR six-hour simulated reflectivity forecast in 15-minute increments with precipitation-type colors centered on Bridgeport, Chicago" />
       {touchMap && <button type="button" className="mapInteractionButton" onClick={toggleMapInteraction}>{mapInteraction ? "Done" : "Move map"}</button>}
-      <div className="radarReadout" aria-live="polite"><strong>{validTimeLabel(modelInitUtc, frameMinutes)}</strong><span>{relativeLabel(relativeMinutes)} from start · HRRR F+{forecastHourLabel(frameMinutes)} · {runLabel(modelInitUtc)}</span></div>
+      <div className="radarReadout" aria-live="polite"><strong>{validTimeLabel(modelInitUtc, frameMinutes)}</strong><span>{relativeLabel(relativeMinutes)} · HRRR F+{forecastHourLabel(frameMinutes)} · {runLabel(modelInitUtc)}</span></div>
     </div>
     <div className="radarControls">
       <button type="button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "Pause forecast radar animation" : "Play forecast radar animation"}><span aria-hidden="true">{playing ? "Ⅱ" : "▶"}</span> {playing ? "Pause" : "Play"}</button>
