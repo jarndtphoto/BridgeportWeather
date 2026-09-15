@@ -43,6 +43,15 @@ export default async function Home(){
     return forecastMinutes===null ? null : getHrrrPointSample(BRIDGEPORT_LAT,BRIDGEPORT_LON,forecastMinutes);
   }));
 
+  const currentPeriod=nextSix[0]??null;
+  const currentRadarPrecip=hourlyRadarSamples[0]?.precipitation===true;
+  const currentForecastSaysPrecip=currentPeriod?precipitationForecast(currentPeriod.shortForecast):false;
+  const currentIconKind=currentPeriod
+    ? (currentRadarPrecip
+        ? (currentForecastSaysPrecip?forecastIconKind(currentPeriod.shortForecast,currentPeriod.icon,currentPeriod.precipitationChance):forecastIconKind("Light Rain",currentPeriod.icon,currentPeriod.precipitationChance))
+        : (currentForecastSaysPrecip?forecastIconKind("Mostly Cloudy",currentPeriod.icon):forecastIconKind(currentPeriod.shortForecast,currentPeriod.icon,currentPeriod.precipitationChance)))
+    : forecastIconKind("Mostly Cloudy",null);
+
   return <main>
     <input className="tabInput" type="radio" id="tab-radar" name="screen" defaultChecked/>
     <input className="tabInput" type="radio" id="tab-station" name="screen"/>
@@ -55,7 +64,10 @@ export default async function Home(){
     <section className="tabPanel stationPanel" aria-labelledby="station-title">
       <div className="stationHeader">
         <div className="stationTopline"><p className="eyebrow">BRIDGEPORT · CHICAGO</p><span className={`live ${snapshot?"connected":""}`}><i/> {snapshot?"LIVE":"OFFLINE"}</span></div>
-        <h1 id="station-title">Current Local Weather</h1>
+        <div className="stationTitleRow">
+          <h1 id="station-title">Current Local Weather</h1>
+          <WeatherIcon className="stationCurrentIcon" kind={currentIconKind}/>
+        </div>
         {snapshot&&<p className="stationObserved">{observedTime(snapshot.observedAt)}</p>}
       </div>
       <div className="grid stationGrid">{metrics.map((metric,index)=><article className={`metric ${index<2?"metricFeatured":""}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong>{metric.detail&&<small>{metric.detail}</small>}</article>)}</div>
