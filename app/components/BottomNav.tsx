@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 
 const tabs = [
-  ["tab-radar", "Live Radar"],
-  ["tab-station", "Current Conditions"],
-  ["tab-forecast", "Forecasted Weather"],
+  ["tab-station", "Home"],
+  ["tab-radar", "Radar"],
+  ["tab-forecast", "Forecast"],
 ] as const;
 
 const REFRESH_THRESHOLD = 72;
