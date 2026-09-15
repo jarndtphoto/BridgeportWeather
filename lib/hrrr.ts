@@ -1,7 +1,7 @@
 import "server-only";
 import { PNG } from "pngjs";
 
-const META_URL = "https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json";
+const META_URL = "https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refp_0360.json";
 const HRRR_REFP_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refp.cgi";
 
 export type HrrrPointSample = {
@@ -13,7 +13,7 @@ type IemMeta = { model_init_utc?: string };
 
 export async function getHrrrModelInitUtc(): Promise<string | null> {
   try {
-    const response = await fetch(META_URL, { next: { revalidate: 300 } });
+    const response = await fetch(META_URL, { next: { revalidate: 60 } });
     if (!response.ok) return null;
     const payload = (await response.json()) as IemMeta;
     return payload.model_init_utc ?? null;
@@ -51,7 +51,7 @@ export async function getHrrrPointSample(lat: number, lon: number, forecastMinut
   });
 
   try {
-    const response = await fetch(`${HRRR_REFP_WMS}?${params.toString()}`, { next: { revalidate: 300 } });
+    const response = await fetch(`${HRRR_REFP_WMS}?${params.toString()}`, { next: { revalidate: 60 } });
     if (!response.ok || !(response.headers.get("content-type") ?? "").includes("image/png")) {
       return { forecastMinutes, precipitation: null };
     }
