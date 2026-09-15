@@ -1,5 +1,6 @@
 import { getAmbientSnapshot, type AmbientSnapshot, type RawObservation } from "../lib/ambient";
 import { getLocalForecast, type LocalForecast } from "../lib/forecast";
+import { getRadarFrames, getRadarPointReflectivity } from "../lib/radar";
 import RadarMap from "./components/RadarMap";
 import ForecastRadar from "./components/ForecastRadar";
 import ThreatBanner from "./components/ThreatBanner";
@@ -18,21 +19,34 @@ function cardinalDirection(degrees: number | null) { if (degrees === null) retur
 function observationMetrics(observation: RawObservation) { const windSpeed = numberValue(observation, "windspeedmph") ?? numberValue(observation, "windspdmph_avg10m"); const direction = cardinalDirection(numberValue(observation, "winddir")); const gust = numberValue(observation, "windgustmph"); const pressure = numberValue(observation, "baromrelin") ?? numberValue(observation, "baromabsin"); return [ { label:"Outdoor temperature",value:formatNumber(numberValue(observation,"tempf"),"°F"),detail:null }, { label:"Wind",value:`${formatNumber(windSpeed," mph")}${direction?` ${direction}`:""}`,detail:gust===null?null:`Gust ${gust.toFixed(1)} mph` }, { label:"Humidity",value:formatNumber(numberValue(observation,"humidity"),"%",0),detail:null }, { label:"Pressure",value:formatNumber(pressure," inHg",2),detail:null }, { label:"Rain today",value:formatNumber(numberValue(observation,"dailyrainin")," in",2),detail:null }, { label:"Rain rate",value:formatNumber(numberValue(observation,"hourlyrainin")," in/hr",2),detail:null }, { label:"Solar radiation",value:formatNumber(numberValue(observation,"solarradiation")," W/m²",0),detail:null }, { label:"UV index",value:formatNumber(numberValue(observation,"uv"),"",0),detail:null } ]; }
 function observedTime(value:string|null){if(!value)return"Latest observation";const date=new Date(value);return Number.isNaN(date.getTime())?"Latest observation":`Observed ${date.toLocaleString("en-US",{timeZone:"America/Chicago",month:"short",day:"numeric",hour:"numeric",minute:"2-digit",timeZoneName:"short"})}`;}
 function forecastTime(value:string){const date=new Date(value);return Number.isNaN(date.getTime())?"—":date.toLocaleTimeString("en-US",{timeZone:"America/Chicago",hour:"numeric"});}
+function stationRainActive(observation: RawObservation | null) {
+  if (!observation) return false;
+  const rate = numberValue(observation,"rainratein") ?? numberValue(observation,"rainrate") ?? numberValue(observation,"hourlyrainin");
+  return rate !== null && rate > 0.001;
+}
+function precipitationForecast(text:string){const value=text.toLowerCase();return value.includes("rain")||value.includes("shower")||value.includes("thunder")||value.includes("drizzle")||value.includes("sleet")||value.includes("snow")||value.includes("wintry")||value.includes("freezing");}
 
 export default async function Home(){
   let snapshot:AmbientSnapshot|null=null;
   let forecast:LocalForecast|null=null;
-  const [ambientResult, forecastResult] = await Promise.allSettled([
+  let radarDbz:number|null=null;
+  const [ambientResult, forecastResult, radarFramesResult] = await Promise.allSettled([
     getAmbientSnapshot(),
     getLocalForecast(BRIDGEPORT_LAT, BRIDGEPORT_LON),
+    getRadarFrames(),
   ]);
   if(ambientResult.status==="fulfilled") snapshot=ambientResult.value;
   if(forecastResult.status==="fulfilled") forecast=forecastResult.value;
+  if(radarFramesResult.status==="fulfilled" && radarFramesResult.value.length){
+    const latest=radarFramesResult.value[radarFramesResult.value.length-1];
+    radarDbz=await getRadarPointReflectivity(BRIDGEPORT_LAT,BRIDGEPORT_LON,latest.observedAt);
+  }
 
   const metrics=snapshot?observationMetrics(snapshot.rawObservation):[{label:"Outdoor temperature",value:"Live data unavailable",detail:null},{label:"Wind",value:"Live data unavailable",detail:null},{label:"Rain",value:"Live data unavailable",detail:null},{label:"Solar",value:"Live data unavailable",detail:null}];
   const now = Date.now();
   const nextSix = forecast?.hourly.filter(period => Date.parse(period.startTime) + 3_600_000 > now).slice(0,6) ?? [];
   const later = forecast?.daily.slice(0,4) ?? [];
+  const livePrecipObserved=(radarDbz??0)>=10||stationRainActive(snapshot?.rawObservation??null);
 
   return <main>
     <input className="tabInput" type="radio" id="tab-radar" name="screen" defaultChecked/>
@@ -57,14 +71,17 @@ export default async function Home(){
       <h1 id="forecast-title">Next 6 Hours</h1>
       {nextSix.length ? <>
         <div className="forecastHours">
-          {nextSix.map(period=><article className="forecastHour" key={period.startTime}>
-            <span className="forecastHourTime">{forecastTime(period.startTime)}</span>
-            <WeatherIcon className="forecastHourIcon" kind={forecastIconKind(period.shortForecast, period.icon, period.precipitationChance)} />
-            <strong>{period.temperature}°</strong>
-            <span>{period.shortForecast}</span>
-            <small>{period.precipitationChance===null?"Rain chance —":`${period.precipitationChance}% rain`}</small>
-            <small>{period.windDirection} {period.windSpeed}</small>
-          </article>)}
+          {nextSix.map(period=>{
+            const predictedKind=forecastIconKind(period.shortForecast,period.icon,period.precipitationChance);
+            const iconKind=!livePrecipObserved&&precipitationForecast(period.shortForecast)?forecastIconKind("Mostly Cloudy",period.icon):predictedKind;
+            return <article className="forecastHour" key={period.startTime}>
+              <span className="forecastHourTime">{forecastTime(period.startTime)}</span>
+              <WeatherIcon className="forecastHourIcon" kind={iconKind}/>
+              <strong>{period.temperature}°</strong>
+              <span>{period.shortForecast}</span>
+              <small>{period.precipitationChance===null?"Rain chance —":`${period.precipitationChance}% rain`}</small>
+              <small>{period.windDirection} {period.windSpeed}</small>
+            </article>})}
         </div>
         <section className="forecastRadarCard" aria-labelledby="forecast-radar-title">
           <div className="sectionTitle radarHeading"><div><p className="kicker">MODEL GUIDANCE</p><h2 id="forecast-radar-title">6-Hour Forecast Radar</h2></div><span>HRRR</span></div>
