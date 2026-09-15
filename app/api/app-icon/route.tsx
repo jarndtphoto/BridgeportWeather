@@ -1,7 +1,7 @@
 export const runtime = "edge";
 
 const ICON_SOURCE =
-  "https://raw.githubusercontent.com/jarndtphoto/BridgeportWeather/main/app/assets/bsw-icon.b64";
+  "https://raw.githubusercontent.com/jarndtphoto/BridgeportWeather/main/Codex%20Image%20Sep%2015%2C%202026%2C%2003_23_04%20PM.png";
 
 export async function GET() {
   const source = await fetch(ICON_SOURCE, { cache: "no-store" });
@@ -9,16 +9,11 @@ export async function GET() {
     return new Response("Icon unavailable", { status: 502 });
   }
 
-  const base64 = (await source.text()).trim();
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
+  const bytes = await source.arrayBuffer();
 
   return new Response(bytes, {
     headers: {
-      "Content-Type": "image/jpeg",
+      "Content-Type": "image/png",
       "Cache-Control": "public, max-age=3600, s-maxage=3600",
     },
   });
