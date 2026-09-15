@@ -1,0 +1,179 @@
+/* Layout refresh: Home / Radar / Forecast */
+
+.homePanel h1,
+.radarPanel h1,
+.forecastPanel h1 {
+  font-size: 28px;
+  line-height: 1.08;
+  margin: 0 0 12px;
+}
+
+.homeConditions,
+.homeForecastPreview,
+.homeOutlook,
+.radarProductSection {
+  margin-top: 18px;
+}
+
+.stationHeader {
+  margin-bottom: 10px;
+}
+
+.stationTopline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stationTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stationTitleRow h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.stationObserved {
+  margin: 4px 0 0;
+  color: #8fa0b4;
+  font-size: 12px;
+}
+
+.compactMetrics {
+  max-width: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.compactMetrics .metric {
+  aspect-ratio: auto;
+  min-height: 92px;
+  justify-content: flex-start;
+  padding: 12px 13px;
+}
+
+.compactMetrics .metric span {
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.compactMetrics .metric strong {
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.compactMetrics .metric small {
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+.homeForecastHours {
+  margin-bottom: 0;
+}
+
+.homeForecastHours .forecastHour {
+  min-height: 158px;
+}
+
+.compactOutlook {
+  margin-bottom: 2px;
+}
+
+.radarProductSection:first-of-type {
+  margin-top: 14px;
+}
+
+.radarProductSection + .radarProductSection {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.radarProductSection .sectionTitle {
+  margin-bottom: 10px;
+}
+
+.radarProductSection .sectionTitle h2 {
+  font-size: 21px;
+}
+
+.radarProductSection .radarMap,
+.forecastRadarSection .radarMap {
+  height: 470px;
+}
+
+.forecastRadarSection .forecastRadarPlayer {
+  margin: 0;
+}
+
+.forecastPanel > .sectionTitle:first-of-type {
+  margin-top: 4px;
+}
+
+/* Correct active state for new nav order: Home / Radar / Forecast. */
+#tab-station:checked ~ .bottomNav .bottomNavButton,
+#tab-radar:checked ~ .bottomNav .bottomNavButton,
+#tab-forecast:checked ~ .bottomNav .bottomNavButton {
+  background: transparent;
+  color: #91a0b3;
+  border-color: #223044;
+}
+
+#tab-station:checked ~ .bottomNav .bottomNavButton:nth-child(1),
+#tab-radar:checked ~ .bottomNav .bottomNavButton:nth-child(2),
+#tab-forecast:checked ~ .bottomNav .bottomNavButton:nth-child(3) {
+  background: #eaf1f8;
+  color: #09111a;
+  border-color: #eaf1f8;
+}
+
+@media (max-width: 480px) {
+  .homePanel h1,
+  .radarPanel h1,
+  .forecastPanel h1 {
+    font-size: 26px;
+  }
+
+  .compactMetrics {
+    gap: 7px;
+  }
+
+  .compactMetrics .metric {
+    min-height: 84px;
+    padding: 10px 11px;
+  }
+
+  .compactMetrics .metric span {
+    font-size: 12px;
+  }
+
+  .compactMetrics .metric strong {
+    font-size: 19px;
+  }
+
+  .radarProductSection .radarMap,
+  .forecastRadarSection .radarMap {
+    height: min(124vw, 500px);
+  }
+
+  .homeForecastHours {
+    grid-template-columns: repeat(4, 112px);
+  }
+}
+
+@media (max-width: 380px) {
+  .compactMetrics .metric {
+    min-height: 80px;
+    padding: 9px 10px;
+  }
+
+  .compactMetrics .metric strong {
+    font-size: 18px;
+  }
+}
