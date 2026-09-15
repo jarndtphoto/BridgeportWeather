@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
 type RadarPayload = { frames: RadarFrame[] };
-const BRIDGEPORT_CENTER: [number, number] = [41.838, -87.65];
+const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
 
 function frameLabel(value?: string) {
   if (!value) return "Waiting for NOAA";
@@ -18,6 +18,7 @@ export default function RadarMap() {
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<typeof Leaflet | null>(null);
   const radarLayerRef = useRef<TileLayer.WMS | null>(null);
+  const fadeFrameRef = useRef<number | null>(null);
   const frameIndexRef = useRef(0);
   const [frames, setFrames] = useState<RadarFrame[]>([]);
   const [frameIndex, setFrameIndex] = useState(0);
@@ -55,14 +56,19 @@ export default function RadarMap() {
       if (!active || !containerRef.current || mapRef.current) return;
       const L = module.default;
       leafletRef.current = L;
-      const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(BRIDGEPORT_CENTER, 8);
+      const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(LOCAL_TARGET, 8);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
-      L.circleMarker(BRIDGEPORT_CENTER, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d67", fillOpacity: 1 }).bindTooltip("Bridgeport target area", { direction: "top" }).addTo(map);
-      L.circle(BRIDGEPORT_CENTER, { radius: 1500, color: "#ff7185", weight: 1, fillColor: "#ff4d67", fillOpacity: 0.06, dashArray: "5 6" }).addTo(map);
+      L.circleMarker(LOCAL_TARGET, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d67", fillOpacity: 1 }).bindTooltip("Bridgeport", { direction: "top" }).addTo(map);
+      L.circle(LOCAL_TARGET, { radius: 900, color: "#ff7185", weight: 1, fillColor: "#ff4d67", fillOpacity: 0.06, dashArray: "5 6" }).addTo(map);
       mapRef.current = map;
       setMapReady(true);
     });
-    return () => { active = false; mapRef.current?.remove(); mapRef.current = null; };
+    return () => {
+      active = false;
+      if (fadeFrameRef.current) window.cancelAnimationFrame(fadeFrameRef.current);
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -70,13 +76,32 @@ export default function RadarMap() {
     const L = leafletRef.current;
     const frame = frames[frameIndex];
     if (!map || !L || !frame) return;
-    if (radarLayerRef.current) map.removeLayer(radarLayerRef.current);
-    radarLayerRef.current = L.tileLayer.wms("/api/radar/image", { layers: "conus_bref_qcd", format: "image/png", transparent: true, opacity: 0.72, time: frame.observedAt, zIndex: 400, tileSize: 256, updateWhenIdle: true } as L.WMSOptions).addTo(map);
+    if (fadeFrameRef.current) window.cancelAnimationFrame(fadeFrameRef.current);
+
+    const previousLayer = radarLayerRef.current;
+    const nextLayer = L.tileLayer.wms("/api/radar/image", { layers: "conus_bref_qcd", format: "image/png", transparent: true, opacity: 0, time: frame.observedAt, zIndex: 400, tileSize: 256, updateWhenIdle: true } as L.WMSOptions).addTo(map);
+    radarLayerRef.current = nextLayer;
+
+    const startedAt = performance.now();
+    const duration = 950;
+    const targetOpacity = 0.72;
+    const fade = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      nextLayer.setOpacity(progress * targetOpacity);
+      previousLayer?.setOpacity((1 - progress) * targetOpacity);
+      if (progress < 1) {
+        fadeFrameRef.current = window.requestAnimationFrame(fade);
+        return;
+      }
+      if (previousLayer && map.hasLayer(previousLayer)) map.removeLayer(previousLayer);
+      fadeFrameRef.current = null;
+    };
+    fadeFrameRef.current = window.requestAnimationFrame(fade);
   }, [frames, frameIndex, mapReady]);
 
   useEffect(() => {
     if (!playing || frames.length < 2) return;
-    const timer = window.setInterval(() => setFrameIndex((index) => (index + 1) % frames.length), 650);
+    const timer = window.setInterval(() => setFrameIndex((index) => (index + 1) % frames.length), 1300);
     return () => window.clearInterval(timer);
   }, [playing, frames.length]);
 
@@ -84,7 +109,7 @@ export default function RadarMap() {
   const isNewest = frameIndex === frames.length - 1;
   return (
     <section className="radarSection" id="radar" aria-labelledby="radar-heading">
-      <div className="sectionTitle radarHeading"><div><p className="kicker">LIVE OBSERVATIONS</p><h3 id="radar-heading">Bridgeport radar</h3></div><span className={`radarFreshness ${status}`}>{status === "ready" ? "NOAA LIVE" : status.toUpperCase()}</span></div>
+      <div className="sectionTitle radarHeading"><div><p className="kicker">LIVE OBSERVATIONS</p><h2 id="radar-heading">Bridgeport radar</h2></div><span className={`radarFreshness ${status}`}>{status === "ready" ? "NOAA LIVE" : status.toUpperCase()}</span></div>
       <div className="radarShell">
         <div ref={containerRef} className="radarMap" aria-label="Interactive NOAA radar map centered on Bridgeport, Chicago" />
         <div className="radarReadout" aria-live="polite"><strong>{frameLabel(currentFrame?.observedAt)}</strong><span>{isNewest ? "Newest observation" : `${Math.max(0, frames.length - 1 - frameIndex)} frames before newest`}</span></div>

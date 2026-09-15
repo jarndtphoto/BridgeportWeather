@@ -57,29 +57,28 @@ export default async function Home() {
   ];
   return (
     <main>
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">BRIDGEPORT · CHICAGO</p>
-          <h1>Storm Watch</h1>
-        </div>
-        <span className={`live ${snapshot ? "connected" : ""}`}><i /> {snapshot ? "LIVE" : "OFFLINE"}</span>
-      </header>
+      <input className="tabInput" type="radio" id="tab-radar" name="screen" defaultChecked />
+      <input className="tabInput" type="radio" id="tab-station" name="screen" />
+      <input className="tabInput" type="radio" id="tab-forecast" name="screen" />
 
-      <section className="hero calm">
-        <p className="kicker">LOCAL SEVERE WEATHER</p>
-        <h2>Monitoring Bridgeport</h2>
-        <p className="summary">Live backyard observations and official NOAA radar are connected. Severe-weather assessment remains a future step and is not active yet.</p>
-        <div className="statusRow">
-          <div><span>Threat</span><strong>Not assessed</strong></div>
-          <div><span>Storm trend</span><strong>Not analyzed</strong></div>
+      <section className="tabPanel radarPanel" aria-labelledby="radar-title">
+        <h1 id="radar-title">Bridgeport Severe Weather</h1>
+        <div className="threatZone">
+          <strong>No active severe-weather assessment</strong>
+          <p>Live radar and local observations are available. Automated severe-weather interpretation is not active yet.</p>
         </div>
-        <a className="radarLink" href="#radar">Open live radar <span aria-hidden="true">↓</span></a>
+        <RadarMap />
       </section>
 
-      <RadarMap />
-
-      <section>
-        <div className="sectionTitle"><h3>At the station</h3><span>WS-2902</span></div>
+      <section className="tabPanel stationPanel" aria-labelledby="station-title">
+        <div className="screenHeader">
+          <div>
+            <p className="eyebrow">BRIDGEPORT · CHICAGO</p>
+            <h1 id="station-title">At the Station</h1>
+          </div>
+          <span className={`live ${snapshot ? "connected" : ""}`}><i /> {snapshot ? "LIVE" : "OFFLINE"}</span>
+        </div>
+        <div className="sectionTitle"><h3>WS-2902 observations</h3><span>LIVE FEED</span></div>
         {snapshot && <div className="stationMeta"><strong>{snapshot.station.name}</strong><span>{observedTime(snapshot.observedAt)}</span></div>}
         <div className="grid">
           {metrics.map((metric) => (
@@ -93,15 +92,19 @@ export default async function Home() {
         <p className="note">Raw observations are retained. Wind reflects the intentionally exposed second-story deck. Temperature, rainfall, and elevated wind are direct sensor readings—not corrected ground truth.</p>
       </section>
 
-      <section className="panel">
-        <div className="sectionTitle"><h3>Storm evolution</h3><span>COMING NEXT</span></div>
-        <div className="trend">
-          <span className="dot" />
-          <div><strong>Strengthening · Steady · Weakening</strong><p>Successive radar and severe-weather observations will be compared to explain how storms are changing as they approach Bridgeport.</p></div>
+      <section className="tabPanel forecastPanel" aria-labelledby="forecast-title">
+        <h1 id="forecast-title">Forecast</h1>
+        <div className="emptyState">
+          <strong>Severe-weather forecast coming next</strong>
+          <p>This area will eventually contain Bridgeport-specific severe-weather forecasting and storm evolution.</p>
         </div>
       </section>
 
-      <footer>Bridgeport Severe Weather · V0.3</footer>
+      <nav className="bottomNav" aria-label="Primary">
+        <label htmlFor="tab-radar">Radar</label>
+        <label htmlFor="tab-station">Station</label>
+        <label htmlFor="tab-forecast">Forecast</label>
+      </nav>
     </main>
   );
 }
