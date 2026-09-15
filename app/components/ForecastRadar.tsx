@@ -12,6 +12,7 @@ const FORECAST_STEP_MINUTES = 15;
 const FORECAST_WINDOW_MINUTES = 360;
 
 type MetaPayload = { modelInitUtc: string | null };
+type ForecastLayer = "precipitation" | "clouds";
 
 function validTimeLabel(modelInitUtc: string | null, forecastMinutes: number) {
   if (!modelInitUtc) return forecastMinutes === 0 ? "Model analysis" : `Forecast +${forecastMinutes} min`;
@@ -46,6 +47,7 @@ export default function ForecastRadar() {
   const overlayRef = useRef<ImageOverlay | null>(null);
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [forecastLayer, setForecastLayer] = useState<ForecastLayer>("precipitation");
   const [mapReady, setMapReady] = useState(false);
   const [modelInitUtc, setModelInitUtc] = useState<string | null>(null);
   const [touchMap, setTouchMap] = useState(false);
@@ -128,37 +130,54 @@ export default function ForecastRadar() {
     if (!map || !L || !mapReady) return;
 
     const frameMinutes = forecastMinutes[frameIndex];
-    const layerName = `refp_${String(frameMinutes).padStart(4, "0")}`;
     const bounds = map.getBounds();
     const sw = L.CRS.EPSG3857.project(bounds.getSouthWest());
     const ne = L.CRS.EPSG3857.project(bounds.getNorthEast());
     const size = map.getSize();
     if (size.x < 100 || size.y < 100) return;
-    const scale = Math.max(1, Math.min(3, 1800 / size.x, 1800 / size.y));
-    const width = Math.round(size.x * scale);
-    const height = Math.round(size.y * scale);
-    const params = new URLSearchParams({
-      SERVICE: "WMS",
-      VERSION: "1.1.1",
-      REQUEST: "GetMap",
-      LAYERS: layerName,
-      STYLES: "",
-      FORMAT: "image/png",
-      TRANSPARENT: "true",
-      SRS: "EPSG:3857",
-      BBOX: `${sw.x},${sw.y},${ne.x},${ne.y}`,
-      WIDTH: String(width),
-      HEIGHT: String(height),
-    });
-    const url = `${HRRR_WMS}?${params.toString()}`;
+
+    let url: string;
+    let opacity: number;
+    if (forecastLayer === "clouds") {
+      if (!modelInitUtc) return;
+      const params = new URLSearchParams({
+        bbox: `${sw.x},${sw.y},${ne.x},${ne.y}`,
+        width: String(size.x),
+        height: String(size.y),
+        modelInitUtc,
+        forecastMinutes: String(frameMinutes),
+      });
+      url = `/api/forecast-cloud/image?${params.toString()}`;
+      opacity = 0.82;
+    } else {
+      const layerName = `refp_${String(frameMinutes).padStart(4, "0")}`;
+      const scale = Math.max(1, Math.min(3, 1800 / size.x, 1800 / size.y));
+      const width = Math.round(size.x * scale);
+      const height = Math.round(size.y * scale);
+      const params = new URLSearchParams({
+        SERVICE: "WMS",
+        VERSION: "1.1.1",
+        REQUEST: "GetMap",
+        LAYERS: layerName,
+        STYLES: "",
+        FORMAT: "image/png",
+        TRANSPARENT: "true",
+        SRS: "EPSG:3857",
+        BBOX: `${sw.x},${sw.y},${ne.x},${ne.y}`,
+        WIDTH: String(width),
+        HEIGHT: String(height),
+      });
+      url = `${HRRR_WMS}?${params.toString()}`;
+      opacity = 0.56;
+    }
+
     const previous = overlayRef.current;
     const next = L.imageOverlay(url, bounds, { opacity: 0, pane: "weather", interactive: false }).addTo(map);
-
     let promoted = false;
     const promote = () => {
       if (promoted) return;
       promoted = true;
-      next.setOpacity(0.56);
+      next.setOpacity(opacity);
       overlayRef.current = next;
       if (previous && previous !== next && map.hasLayer(previous)) map.removeLayer(previous);
     };
@@ -171,32 +190,45 @@ export default function ForecastRadar() {
       next.off("error", discard);
       if (overlayRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
     };
-  }, [forecastMinutes, frameIndex, mapReady, viewRevision]);
+  }, [forecastMinutes, frameIndex, forecastLayer, mapReady, modelInitUtc, viewRevision]);
 
   useEffect(() => {
     if (!playing || mapInteraction) return;
-    const timer = window.setInterval(() => setFrameIndex((index) => (index + 1) % forecastMinutes.length), 900);
+    const step = forecastLayer === "clouds" ? 4 : 1;
+    const interval = forecastLayer === "clouds" ? 1300 : 900;
+    const timer = window.setInterval(() => setFrameIndex((index) => (index + step) % forecastMinutes.length), interval);
     return () => window.clearInterval(timer);
-  }, [forecastMinutes.length, playing, mapInteraction]);
+  }, [forecastMinutes.length, playing, mapInteraction, forecastLayer]);
 
   const frameMinutes = forecastMinutes[frameIndex];
-  const relativeMinutes = frameIndex * FORECAST_STEP_MINUTES;
+  const cloudFrameMinutes = Math.round(frameMinutes / 60) * 60;
+  const displayMinutes = forecastLayer === "clouds" ? cloudFrameMinutes : frameMinutes;
+  const relativeMinutes = Math.max(0, displayMinutes - forecastMinutes[0]);
+  const setLayer = (layer: ForecastLayer) => {
+    setPlaying(false);
+    setForecastLayer(layer);
+    if (layer === "clouds") setFrameIndex(Math.round(frameIndex / 4) * 4);
+  };
   const toggleMapInteraction = () => {
     if (!mapInteraction) setPlaying(false);
     setMapInteraction((value) => !value);
   };
 
   return <div className="forecastRadarPlayer">
+    <div className="weatherLayerToggle" role="group" aria-label="Forecast weather layer">
+      <button type="button" className={forecastLayer === "precipitation" ? "active" : ""} onClick={() => setLayer("precipitation")}>Precipitation</button>
+      <button type="button" className={forecastLayer === "clouds" ? "active" : ""} onClick={() => setLayer("clouds")}>Cloud Cover</button>
+    </div>
     <div className="radarShell forecastRadarShell">
-      <div ref={containerRef} className={`radarMap forecastRadarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label="HRRR six-hour simulated reflectivity forecast in 15-minute increments with precipitation-type colors centered on Bridgeport, Chicago" />
+      <div ref={containerRef} className={`radarMap forecastRadarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label={`HRRR six-hour ${forecastLayer === "precipitation" ? "simulated reflectivity" : "total cloud cover"} forecast centered on Bridgeport, Chicago`} />
       {touchMap && <button type="button" className="mapInteractionButton" onClick={toggleMapInteraction}>{mapInteraction ? "Done" : "Move map"}</button>}
-      <div className="radarReadout" aria-live="polite"><strong>{validTimeLabel(modelInitUtc, frameMinutes)}</strong><span>{relativeLabel(relativeMinutes)} · HRRR F+{forecastHourLabel(frameMinutes)} · {runLabel(modelInitUtc)}</span></div>
+      <div className="radarReadout" aria-live="polite"><strong>{validTimeLabel(modelInitUtc, displayMinutes)}</strong><span>{relativeLabel(relativeMinutes)} · HRRR F+{forecastHourLabel(displayMinutes)} · {runLabel(modelInitUtc)}</span></div>
     </div>
     <div className="radarControls">
-      <button type="button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "Pause forecast radar animation" : "Play forecast radar animation"}><span aria-hidden="true">{playing ? "Ⅱ" : "▶"}</span> {playing ? "Pause" : "Play"}</button>
-      <input type="range" min="0" max={forecastMinutes.length - 1} value={frameIndex} onChange={(event) => { setPlaying(false); setFrameIndex(Number(event.target.value)); }} aria-label="HRRR forecast timeline in 15-minute increments" />
+      <button type="button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "Pause forecast animation" : "Play forecast animation"}><span aria-hidden="true">{playing ? "Ⅱ" : "▶"}</span> {playing ? "Pause" : "Play"}</button>
+      <input type="range" min="0" max={forecastMinutes.length - 1} value={frameIndex} step={forecastLayer === "clouds" ? 4 : 1} onChange={(event) => { setPlaying(false); setFrameIndex(Number(event.target.value)); }} aria-label={forecastLayer === "clouds" ? "HRRR hourly cloud cover forecast timeline" : "HRRR forecast timeline in 15-minute increments"} />
       <button type="button" className="newestButton" onClick={() => { setPlaying(false); setFrameIndex(forecastMinutes.length - 1); }} disabled={frameIndex === forecastMinutes.length - 1 && !playing}>+6 hr</button>
     </div>
-    <p className="radarSource">NCEP HRRR simulated reflectivity at 1 km AGL via Iowa Environmental Mesonet · 15-minute forecast increments · precipitation-type color ramp · model guidance, not observed radar</p>
+    <p className="radarSource">{forecastLayer === "precipitation" ? "NCEP HRRR simulated reflectivity at 1 km AGL via Iowa Environmental Mesonet · 15-minute forecast increments · precipitation-type color ramp · model guidance, not observed radar" : "NOAA/NCEP HRRR total cloud cover (TCDC) via NOMADS · hourly cloud fields on the same six-hour forecast window · model guidance"}</p>
   </div>;
 }
