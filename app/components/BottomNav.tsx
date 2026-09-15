@@ -2,7 +2,7 @@
 
 const tabs = [
   ["tab-radar", "Radar"],
-  ["tab-station", "Station"],
+  ["tab-station", "Current"],
   ["tab-forecast", "Forecast"],
 ] as const;
 
