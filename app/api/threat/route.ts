@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 const BRIDGEPORT_LAT = 41.8382, BRIDGEPORT_LON = -87.6331, STATE_CODE = "IL";
 function numberField(observation: Record<string, unknown>, key: string): number | null { const value = observation[key]; return typeof value === "number" ? value : null; }
 function precipText(value:string){const text=value.toLowerCase();return text.includes("rain")||text.includes("shower")||text.includes("thunder")||text.includes("drizzle");}
+// Treat the next two hours as dry only when HRRR stays dry and NWS does not show likely precipitation.
 async function nearTermForecastDry(){
   const [forecastResult,hrrrMetaResult]=await Promise.allSettled([getLocalForecast(BRIDGEPORT_LAT,BRIDGEPORT_LON),getHrrrModelInitUtc()]);
   if(forecastResult.status!=="fulfilled"||hrrrMetaResult.status!=="fulfilled"||!hrrrMetaResult.value)return null;
