@@ -42,7 +42,7 @@ export default function ThreatBanner() {
     return (
       <div className="threatZone">
         <strong>Checking local conditions…</strong>
-        <p>Combining live station data and radar to assess current severe-weather threats.</p>
+        <p>Combining live station data, radar, and official NWS alerts to assess current severe-weather threats.</p>
       </div>
     );
   }
@@ -51,19 +51,18 @@ export default function ThreatBanner() {
     return (
       <div className="threatZone">
         <strong>Threat assessment unavailable</strong>
-        <p>Live station or radar data couldn&rsquo;t be reached. The app will retry automatically.</p>
+        <p>Live weather data couldn&rsquo;t be reached. The app will retry automatically.</p>
       </div>
     );
   }
 
-  const activeFactors = assessment.factors.filter((factor) => factor.category !== "rotation" && factor.level !== "none");
-  const rotationFactor = assessment.factors.find((factor) => factor.category === "rotation");
+  const activeFactors = assessment.factors.filter((factor) => factor.level !== "none");
 
   return (
     <div className={`threatZone threatLevel-${assessment.overallLevel}`}>
       <strong>{LEVEL_COPY[assessment.overallLevel]}</strong>
       {activeFactors.length === 0 ? (
-        <p>Wind, rain rate, and radar reflectivity at Bridgeport are all within normal ranges.</p>
+        <p>Official alerts and local severe-weather indicators are currently quiet for Bridgeport.</p>
       ) : (
         <ul className="threatFactorList">
           {activeFactors.map((factor) => (
@@ -74,7 +73,6 @@ export default function ThreatBanner() {
           ))}
         </ul>
       )}
-      {rotationFactor && <p className="threatRotationNote">{rotationFactor.detail}</p>}
     </div>
   );
 }
