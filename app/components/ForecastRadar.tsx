@@ -8,11 +8,13 @@ const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
 const HRRR_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refp.cgi";
 const BASEMAP = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const BASEMAP_ATTRIBUTION = "&copy; OpenStreetMap contributors";
+const FORECAST_STEP_MINUTES = 15;
+const FORECAST_WINDOW_MINUTES = 360;
 
 type MetaPayload = { modelInitUtc: string | null };
 
 function validTimeLabel(modelInitUtc: string | null, forecastMinutes: number) {
-  if (!modelInitUtc) return forecastMinutes === 0 ? "Model analysis" : `Forecast +${forecastMinutes / 60} hr`;
+  if (!modelInitUtc) return forecastMinutes === 0 ? "Model analysis" : `Forecast +${forecastMinutes} min`;
   const valid = new Date(Date.parse(modelInitUtc) + forecastMinutes * 60_000);
   return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(valid);
 }
@@ -20,6 +22,21 @@ function validTimeLabel(modelInitUtc: string | null, forecastMinutes: number) {
 function runLabel(modelInitUtc: string | null) {
   if (!modelInitUtc) return "Latest HRRR run";
   return `Run ${new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(modelInitUtc))}`;
+}
+
+function relativeLabel(minutes: number) {
+  if (minutes === 0) return "Start";
+  const hours = Math.floor(minutes / 60);
+  const remaining = minutes % 60;
+  if (!hours) return `+${remaining} min`;
+  if (!remaining) return `+${hours} hr`;
+  return `+${hours} hr ${remaining} min`;
+}
+
+function forecastHourLabel(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const remaining = minutes % 60;
+  return remaining ? `${hours}:${String(remaining).padStart(2, "0")}` : String(hours);
 }
 
 export default function ForecastRadar() {
@@ -43,11 +60,12 @@ export default function ForecastRadar() {
   }, []);
 
   const forecastMinutes = useMemo(() => {
-    if (!modelInitUtc) return [0, 60, 120, 180, 240, 300, 360];
+    const frameCount = FORECAST_WINDOW_MINUTES / FORECAST_STEP_MINUTES + 1;
+    if (!modelInitUtc) return Array.from({ length: frameCount }, (_, index) => index * FORECAST_STEP_MINUTES);
     const initMs = Date.parse(modelInitUtc);
-    const ageHours = Math.max(0, Math.ceil((Date.now() - initMs) / 3_600_000));
-    const startMinutes = Math.min(ageHours * 60, 720);
-    return Array.from({ length: 7 }, (_, index) => startMinutes + index * 60);
+    const ageMinutes = Math.max(0, Math.ceil((Date.now() - initMs) / (FORECAST_STEP_MINUTES * 60_000)) * FORECAST_STEP_MINUTES);
+    const startMinutes = Math.min(ageMinutes, 720);
+    return Array.from({ length: frameCount }, (_, index) => startMinutes + index * FORECAST_STEP_MINUTES);
   }, [modelInitUtc]);
 
   useEffect(() => { setFrameIndex(0); }, [modelInitUtc]);
@@ -154,12 +172,12 @@ export default function ForecastRadar() {
 
   useEffect(() => {
     if (!playing || mapInteraction) return;
-    const timer = window.setInterval(() => setFrameIndex((index) => (index + 1) % forecastMinutes.length), 1900);
+    const timer = window.setInterval(() => setFrameIndex((index) => (index + 1) % forecastMinutes.length), 900);
     return () => window.clearInterval(timer);
   }, [forecastMinutes.length, playing, mapInteraction]);
 
   const frameMinutes = forecastMinutes[frameIndex];
-  const relativeHours = frameIndex;
+  const relativeMinutes = frameIndex * FORECAST_STEP_MINUTES;
   const toggleMapInteraction = () => {
     if (!mapInteraction) setPlaying(false);
     setMapInteraction((value) => !value);
@@ -167,15 +185,15 @@ export default function ForecastRadar() {
 
   return <div className="forecastRadarPlayer">
     <div className="radarShell forecastRadarShell">
-      <div ref={containerRef} className={`radarMap forecastRadarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label="HRRR six-hour simulated reflectivity forecast with precipitation-type colors centered on Bridgeport, Chicago" />
+      <div ref={containerRef} className={`radarMap forecastRadarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label="HRRR six-hour simulated reflectivity forecast in 15-minute increments with precipitation-type colors centered on Bridgeport, Chicago" />
       {touchMap && <button type="button" className="mapInteractionButton" onClick={toggleMapInteraction}>{mapInteraction ? "Done" : "Move map"}</button>}
-      <div className="radarReadout" aria-live="polite"><strong>{validTimeLabel(modelInitUtc, frameMinutes)}</strong><span>{relativeHours === 0 ? "First future HRRR hour" : `+${relativeHours} hr from start`} · HRRR F+{frameMinutes / 60} · {runLabel(modelInitUtc)}</span></div>
+      <div className="radarReadout" aria-live="polite"><strong>{validTimeLabel(modelInitUtc, frameMinutes)}</strong><span>{relativeLabel(relativeMinutes)} from start · HRRR F+{forecastHourLabel(frameMinutes)} · {runLabel(modelInitUtc)}</span></div>
     </div>
     <div className="radarControls">
       <button type="button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "Pause forecast radar animation" : "Play forecast radar animation"}><span aria-hidden="true">{playing ? "Ⅱ" : "▶"}</span> {playing ? "Pause" : "Play"}</button>
-      <input type="range" min="0" max={forecastMinutes.length - 1} value={frameIndex} onChange={(event) => { setPlaying(false); setFrameIndex(Number(event.target.value)); }} aria-label="HRRR forecast hour" />
+      <input type="range" min="0" max={forecastMinutes.length - 1} value={frameIndex} onChange={(event) => { setPlaying(false); setFrameIndex(Number(event.target.value)); }} aria-label="HRRR forecast timeline in 15-minute increments" />
       <button type="button" className="newestButton" onClick={() => { setPlaying(false); setFrameIndex(forecastMinutes.length - 1); }} disabled={frameIndex === forecastMinutes.length - 1 && !playing}>+6 hr</button>
     </div>
-    <p className="radarSource">NCEP HRRR simulated reflectivity at 1 km AGL via Iowa Environmental Mesonet · precipitation-type color ramp · model guidance, not observed radar</p>
+    <p className="radarSource">NCEP HRRR simulated reflectivity at 1 km AGL via Iowa Environmental Mesonet · 15-minute forecast increments · precipitation-type color ramp · model guidance, not observed radar</p>
   </div>;
 }
