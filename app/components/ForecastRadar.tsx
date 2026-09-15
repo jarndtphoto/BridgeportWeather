@@ -20,13 +20,6 @@ function runLabel(modelInitUtc: string | null) {
   return `Run ${new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(modelInitUtc))}`;
 }
 
-function runKey(modelInitUtc: string | null) {
-  if (!modelInitUtc) return "latest";
-  const date = new Date(modelInitUtc);
-  if (Number.isNaN(date.getTime())) return "latest";
-  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-}
-
 export default function ForecastRadar() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -81,6 +74,22 @@ export default function ForecastRadar() {
   }, []);
 
   useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect || rect.width < 100 || rect.height < 100) return;
+      window.requestAnimationFrame(() => {
+        const map = mapRef.current;
+        if (!map) return;
+        map.invalidateSize(false);
+        setViewRevision((value) => value + 1);
+      });
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map || !touchMap) return;
     if (mapInteraction) map.dragging.enable();
@@ -98,8 +107,9 @@ export default function ForecastRadar() {
     const sw = L.CRS.EPSG3857.project(bounds.getSouthWest());
     const ne = L.CRS.EPSG3857.project(bounds.getNorthEast());
     const size = map.getSize();
-    const width = Math.max(512, Math.min(1400, Math.round(size.x * 2)));
-    const height = Math.max(512, Math.min(1400, Math.round(size.y * 2)));
+    if (size.x < 100 || size.y < 100) return;
+    const width = Math.max(640, Math.min(1400, Math.round(size.x * 2)));
+    const height = Math.max(640, Math.min(1400, Math.round(size.y * 2)));
     const params = new URLSearchParams({
       SERVICE: "WMS",
       VERSION: "1.1.1",
@@ -112,7 +122,6 @@ export default function ForecastRadar() {
       BBOX: `${sw.x},${sw.y},${ne.x},${ne.y}`,
       WIDTH: String(width),
       HEIGHT: String(height),
-      RUN: runKey(modelInitUtc),
     });
     const url = `${HRRR_WMS}?${params.toString()}`;
     const previous = overlayRef.current;
@@ -138,7 +147,7 @@ export default function ForecastRadar() {
       next.off("error", discard);
       if (overlayRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
     };
-  }, [forecastMinutes, frameIndex, mapReady, modelInitUtc, viewRevision]);
+  }, [forecastMinutes, frameIndex, mapReady, viewRevision]);
 
   useEffect(() => {
     if (!playing || mapInteraction) return;
