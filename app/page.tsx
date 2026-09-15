@@ -42,9 +42,10 @@ export default async function Home(){
     </section>
 
     <section className="tabPanel stationPanel" aria-labelledby="station-title">
-      <div className="screenHeader stationHeader">
-        <div><p className="eyebrow">BRIDGEPORT · CHICAGO</p><h1 id="station-title">Current Local Weather</h1>{snapshot&&<p className="stationObserved">{observedTime(snapshot.observedAt)}</p>}</div>
-        <span className={`live ${snapshot?"connected":""}`}><i/> {snapshot?"LIVE":"OFFLINE"}</span>
+      <div className="stationHeader">
+        <div className="stationTopline"><p className="eyebrow">BRIDGEPORT · CHICAGO</p><span className={`live ${snapshot?"connected":""}`}><i/> {snapshot?"LIVE":"OFFLINE"}</span></div>
+        <h1 id="station-title">Current Local Weather</h1>
+        {snapshot&&<p className="stationObserved">{observedTime(snapshot.observedAt)}</p>}
       </div>
       <div className="grid stationGrid">{metrics.map((metric,index)=><article className={`metric ${index<2?"metricFeatured":""}`} key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong>{metric.detail&&<small>{metric.detail}</small>}</article>)}</div>
     </section>
