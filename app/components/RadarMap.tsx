@@ -1,12 +1,15 @@
 "use client";
 
 import type * as Leaflet from "leaflet";
-import type { Map as LeafletMap, TileLayer } from "leaflet";
+import type { ImageOverlay, Map as LeafletMap } from "leaflet";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
 type RadarPayload = { frames: RadarFrame[] };
 const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
+const BASEMAP = "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png";
+const LABELS = "https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png";
+const CARTO_ATTRIBUTION = "&copy; OpenStreetMap contributors &copy; CARTO";
 
 function frameLabel(value?: string) {
   if (!value) return "Waiting for NOAA";
@@ -17,7 +20,7 @@ export default function RadarMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<typeof Leaflet | null>(null);
-  const radarLayerRef = useRef<TileLayer.WMS | null>(null);
+  const radarLayerRef = useRef<ImageOverlay | null>(null);
   const frameIndexRef = useRef(0);
   const [frames, setFrames] = useState<RadarFrame[]>([]);
   const [frameIndex, setFrameIndex] = useState(0);
@@ -26,6 +29,7 @@ export default function RadarMap() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [touchMap, setTouchMap] = useState(false);
   const [mapInteraction, setMapInteraction] = useState(false);
+  const [viewRevision, setViewRevision] = useState(0);
 
   useEffect(() => { frameIndexRef.current = frameIndex; }, [frameIndex]);
 
@@ -58,12 +62,20 @@ export default function RadarMap() {
       const L = module.default;
       leafletRef.current = L;
       const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(LOCAL_TARGET, 8);
+      map.createPane("weather");
+      map.getPane("weather")!.style.zIndex = "400";
+      map.getPane("weather")!.style.pointerEvents = "none";
+      map.createPane("weatherLabels");
+      map.getPane("weatherLabels")!.style.zIndex = "550";
+      map.getPane("weatherLabels")!.style.pointerEvents = "none";
       const isTouch = window.matchMedia("(pointer: coarse)").matches;
       if (isTouch) map.dragging.disable();
       setTouchMap(isTouch);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+      L.tileLayer(BASEMAP, { maxZoom: 20, subdomains: "abcd", attribution: CARTO_ATTRIBUTION }).addTo(map);
+      L.tileLayer(LABELS, { maxZoom: 20, subdomains: "abcd", pane: "weatherLabels", attribution: CARTO_ATTRIBUTION }).addTo(map);
       L.circleMarker(LOCAL_TARGET, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d67", fillOpacity: 1 }).bindTooltip("Bridgeport", { direction: "top" }).addTo(map);
       L.circle(LOCAL_TARGET, { radius: 900, color: "#ff7185", weight: 1, fillColor: "#ff4d67", fillOpacity: 0.06, dashArray: "5 6" }).addTo(map);
+      map.on("moveend zoomend", () => setViewRevision((value) => value + 1));
       mapRef.current = map;
       setMapReady(true);
     });
@@ -79,7 +91,12 @@ export default function RadarMap() {
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
       if (!rect || rect.width < 100 || rect.height < 100) return;
-      window.requestAnimationFrame(() => mapRef.current?.invalidateSize(false));
+      window.requestAnimationFrame(() => {
+        const map = mapRef.current;
+        if (!map) return;
+        map.invalidateSize(false);
+        setViewRevision((value) => value + 1);
+      });
     });
     observer.observe(containerRef.current);
     return () => observer.disconnect();
@@ -98,35 +115,41 @@ export default function RadarMap() {
     const frame = frames[frameIndex];
     if (!map || !L || !frame || !mapReady) return;
 
-    const previousLayer = radarLayerRef.current;
-    const nextLayer = L.tileLayer.wms("/api/radar/image", {
-      layers: "conus_bref_qcd",
-      format: "image/png",
-      transparent: true,
-      opacity: 0,
+    const bounds = map.getBounds();
+    const sw = L.CRS.EPSG3857.project(bounds.getSouthWest());
+    const ne = L.CRS.EPSG3857.project(bounds.getNorthEast());
+    const size = map.getSize();
+    if (size.x < 100 || size.y < 100) return;
+    const scale = Math.max(1, Math.min(3, 1800 / size.x, 1800 / size.y));
+    const width = Math.round(size.x * scale);
+    const height = Math.round(size.y * scale);
+    const params = new URLSearchParams({
+      bbox: `${sw.x},${sw.y},${ne.x},${ne.y}`,
+      width: String(width),
+      height: String(height),
       time: frame.observedAt,
-      zIndex: 400,
-      tileSize: 256,
-      updateWhenIdle: true,
-      keepBuffer: 2,
-    } as L.WMSOptions).addTo(map);
+    });
+    const previous = radarLayerRef.current;
+    const next = L.imageOverlay(`/api/radar/image?${params.toString()}`, bounds, { opacity: 0, pane: "weather", interactive: false }).addTo(map);
 
     let promoted = false;
     const promote = () => {
       if (promoted) return;
       promoted = true;
-      nextLayer.setOpacity(0.72);
-      radarLayerRef.current = nextLayer;
-      if (previousLayer && previousLayer !== nextLayer && map.hasLayer(previousLayer)) map.removeLayer(previousLayer);
+      next.setOpacity(0.64);
+      radarLayerRef.current = next;
+      if (previous && previous !== next && map.hasLayer(previous)) map.removeLayer(previous);
     };
+    const discard = () => { if (map.hasLayer(next)) map.removeLayer(next); };
 
-    nextLayer.once("load", promote);
-
+    next.once("load", promote);
+    next.once("error", discard);
     return () => {
-      nextLayer.off("load", promote);
-      if (radarLayerRef.current !== nextLayer && map.hasLayer(nextLayer)) map.removeLayer(nextLayer);
+      next.off("load", promote);
+      next.off("error", discard);
+      if (radarLayerRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
     };
-  }, [frames, frameIndex, mapReady]);
+  }, [frames, frameIndex, mapReady, viewRevision]);
 
   useEffect(() => {
     if (!playing || frames.length < 2 || mapInteraction) return;
@@ -155,7 +178,7 @@ export default function RadarMap() {
         <button type="button" className="newestButton" onClick={() => { setPlaying(false); setFrameIndex(Math.max(0, frames.length - 1)); }} disabled={!frames.length || isNewest}>Current Radar</button>
       </div>
       {status === "error" && <p className="radarError">NOAA radar is temporarily unavailable. The app will retry automatically.</p>}
-      <p className="radarSource">NOAA/NWS MRMS quality-controlled base reflectivity · actual observations · typically updates about every 2 minutes</p>
+      <p className="radarSource">NOAA/NWS MRMS quality-controlled base reflectivity · high-resolution observed radar · typically updates about every 2 minutes</p>
     </section>
   );
 }
