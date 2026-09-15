@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import type { ThreatAssessment, ThreatLevel } from "../../lib/threat";
+import type { StormEvolution } from "../../lib/evolution";
 
-type ThreatResponse = { assessment: ThreatAssessment };
+type ThreatResponse = { assessment: ThreatAssessment; evolution?: StormEvolution };
 
 const LEVEL_COPY: Record<ThreatLevel, string> = {
   none: "No elevated threat",
@@ -14,6 +15,7 @@ const LEVEL_COPY: Record<ThreatLevel, string> = {
 
 export default function ThreatBanner() {
   const [assessment, setAssessment] = useState<ThreatAssessment | null>(null);
+  const [evolution, setEvolution] = useState<StormEvolution | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
@@ -25,6 +27,7 @@ export default function ThreatBanner() {
         const payload = (await response.json()) as ThreatResponse;
         if (!active) return;
         setAssessment(payload.assessment);
+        setEvolution(payload.evolution ?? null);
         setStatus("ready");
       } catch {
         if (active) setStatus("error");
@@ -42,7 +45,7 @@ export default function ThreatBanner() {
     return (
       <div className="threatZone">
         <strong>Checking local conditions…</strong>
-        <p>Combining live station data, radar, and official NWS alerts to assess current severe-weather threats.</p>
+        <p>Combining live station data, radar evolution, and official NWS alerts to assess current severe-weather threats.</p>
       </div>
     );
   }
@@ -72,6 +75,12 @@ export default function ThreatBanner() {
             </li>
           ))}
         </ul>
+      )}
+      {evolution && (
+        <div className="stormEvolution">
+          <strong>{evolution.headline}</strong>
+          <p>{evolution.detail}</p>
+        </div>
       )}
     </div>
   );
