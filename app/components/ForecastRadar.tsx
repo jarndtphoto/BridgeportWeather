@@ -5,7 +5,7 @@ import type { ImageOverlay, Map as LeafletMap } from "leaflet";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
-const HRRR_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi";
+const HRRR_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refp.cgi";
 const BASEMAP = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const BASEMAP_ATTRIBUTION = "&copy; OpenStreetMap contributors";
 
@@ -107,7 +107,7 @@ export default function ForecastRadar() {
     if (!map || !L || !mapReady) return;
 
     const frameMinutes = forecastMinutes[frameIndex];
-    const layerName = `refd_${String(frameMinutes).padStart(4, "0")}`;
+    const layerName = `refp_${String(frameMinutes).padStart(4, "0")}`;
     const bounds = map.getBounds();
     const sw = L.CRS.EPSG3857.project(bounds.getSouthWest());
     const ne = L.CRS.EPSG3857.project(bounds.getNorthEast());
@@ -167,7 +167,7 @@ export default function ForecastRadar() {
 
   return <div className="forecastRadarPlayer">
     <div className="radarShell forecastRadarShell">
-      <div ref={containerRef} className={`radarMap forecastRadarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label="HRRR six-hour simulated reflectivity forecast centered on Bridgeport, Chicago" />
+      <div ref={containerRef} className={`radarMap forecastRadarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label="HRRR six-hour simulated reflectivity forecast with precipitation-type colors centered on Bridgeport, Chicago" />
       {touchMap && <button type="button" className="mapInteractionButton" onClick={toggleMapInteraction}>{mapInteraction ? "Done" : "Move map"}</button>}
       <div className="radarReadout" aria-live="polite"><strong>{validTimeLabel(modelInitUtc, frameMinutes)}</strong><span>{relativeHours === 0 ? "First future HRRR hour" : `+${relativeHours} hr from start`} · HRRR F+{frameMinutes / 60} · {runLabel(modelInitUtc)}</span></div>
     </div>
@@ -176,6 +176,6 @@ export default function ForecastRadar() {
       <input type="range" min="0" max={forecastMinutes.length - 1} value={frameIndex} onChange={(event) => { setPlaying(false); setFrameIndex(Number(event.target.value)); }} aria-label="HRRR forecast hour" />
       <button type="button" className="newestButton" onClick={() => { setPlaying(false); setFrameIndex(forecastMinutes.length - 1); }} disabled={frameIndex === forecastMinutes.length - 1 && !playing}>+6 hr</button>
     </div>
-    <p className="radarSource">NCEP HRRR simulated reflectivity at 1 km AGL via Iowa Environmental Mesonet · high-resolution rendering of model guidance, not observed radar</p>
+    <p className="radarSource">NCEP HRRR simulated reflectivity at 1 km AGL via Iowa Environmental Mesonet · precipitation-type color ramp · model guidance, not observed radar</p>
   </div>;
 }
