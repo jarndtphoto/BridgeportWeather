@@ -7,9 +7,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
 type RadarPayload = { frames: RadarFrame[] };
 const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
-const BASEMAP = "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png";
-const LABELS = "https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png";
-const CARTO_ATTRIBUTION = "&copy; OpenStreetMap contributors &copy; CARTO";
+const BASEMAP = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const BASEMAP_ATTRIBUTION = "&copy; OpenStreetMap contributors";
 
 function frameLabel(value?: string) {
   if (!value) return "Waiting for NOAA";
@@ -65,14 +64,10 @@ export default function RadarMap() {
       map.createPane("weather");
       map.getPane("weather")!.style.zIndex = "400";
       map.getPane("weather")!.style.pointerEvents = "none";
-      map.createPane("weatherLabels");
-      map.getPane("weatherLabels")!.style.zIndex = "550";
-      map.getPane("weatherLabels")!.style.pointerEvents = "none";
       const isTouch = window.matchMedia("(pointer: coarse)").matches;
       if (isTouch) map.dragging.disable();
       setTouchMap(isTouch);
-      L.tileLayer(BASEMAP, { maxZoom: 20, subdomains: "abcd", attribution: CARTO_ATTRIBUTION }).addTo(map);
-      L.tileLayer(LABELS, { maxZoom: 20, subdomains: "abcd", pane: "weatherLabels", attribution: CARTO_ATTRIBUTION }).addTo(map);
+      L.tileLayer(BASEMAP, { maxZoom: 19, attribution: BASEMAP_ATTRIBUTION }).addTo(map);
       L.circleMarker(LOCAL_TARGET, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d67", fillOpacity: 1 }).bindTooltip("Bridgeport", { direction: "top" }).addTo(map);
       L.circle(LOCAL_TARGET, { radius: 900, color: "#ff7185", weight: 1, fillColor: "#ff4d67", fillOpacity: 0.06, dashArray: "5 6" }).addTo(map);
       map.on("moveend zoomend", () => setViewRevision((value) => value + 1));
@@ -136,7 +131,7 @@ export default function RadarMap() {
     const promote = () => {
       if (promoted) return;
       promoted = true;
-      next.setOpacity(0.64);
+      next.setOpacity(0.58);
       radarLayerRef.current = next;
       if (previous && previous !== next && map.hasLayer(previous)) map.removeLayer(previous);
     };
