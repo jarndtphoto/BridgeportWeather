@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 function validSize(value: string | null) {
   const number = Number(value);
-  return Number.isInteger(number) && number > 0 && number <= 1024 ? String(number) : null;
+  return Number.isInteger(number) && number > 0 && number <= 2048 ? String(number) : null;
 }
 
 function validBbox(value: string | null) {
