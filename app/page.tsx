@@ -1,4 +1,5 @@
 import { getAmbientSnapshot, type AmbientSnapshot, type RawObservation } from "../lib/ambient";
+import RadarMap from "./components/RadarMap";
 
 export const dynamic = "force-dynamic";
 
@@ -67,12 +68,15 @@ export default async function Home() {
       <section className="hero calm">
         <p className="kicker">LOCAL SEVERE WEATHER</p>
         <h2>Monitoring Bridgeport</h2>
-        <p className="summary">Live backyard observations are connected. Severe-weather assessment remains a future step and is not active yet.</p>
+        <p className="summary">Live backyard observations and official NOAA radar are connected. Severe-weather assessment remains a future step and is not active yet.</p>
         <div className="statusRow">
           <div><span>Threat</span><strong>Not assessed</strong></div>
-          <div><span>Storm trend</span><strong>Waiting for radar</strong></div>
+          <div><span>Storm trend</span><strong>Not analyzed</strong></div>
         </div>
+        <a className="radarLink" href="#radar">Open live radar <span aria-hidden="true">↓</span></a>
       </section>
+
+      <RadarMap />
 
       <section>
         <div className="sectionTitle"><h3>At the station</h3><span>WS-2902</span></div>
@@ -97,7 +101,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <footer>Bridgeport Severe Weather · V0.2</footer>
+      <footer>Bridgeport Severe Weather · V0.3</footer>
     </main>
   );
 }
