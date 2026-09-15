@@ -6,9 +6,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
 const HRRR_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi";
-const BASEMAP = "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png";
-const LABELS = "https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png";
-const CARTO_ATTRIBUTION = "&copy; OpenStreetMap contributors &copy; CARTO";
+const BASEMAP = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const BASEMAP_ATTRIBUTION = "&copy; OpenStreetMap contributors";
 
 type MetaPayload = { modelInitUtc: string | null };
 
@@ -63,14 +62,10 @@ export default function ForecastRadar() {
       map.createPane("weather");
       map.getPane("weather")!.style.zIndex = "400";
       map.getPane("weather")!.style.pointerEvents = "none";
-      map.createPane("weatherLabels");
-      map.getPane("weatherLabels")!.style.zIndex = "550";
-      map.getPane("weatherLabels")!.style.pointerEvents = "none";
       const isTouch = window.matchMedia("(pointer: coarse)").matches;
       if (isTouch) map.dragging.disable();
       setTouchMap(isTouch);
-      L.tileLayer(BASEMAP, { maxZoom: 20, subdomains: "abcd", attribution: CARTO_ATTRIBUTION }).addTo(map);
-      L.tileLayer(LABELS, { maxZoom: 20, subdomains: "abcd", pane: "weatherLabels", attribution: CARTO_ATTRIBUTION }).addTo(map);
+      L.tileLayer(BASEMAP, { maxZoom: 19, attribution: BASEMAP_ATTRIBUTION }).addTo(map);
       L.circleMarker(LOCAL_TARGET, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d67", fillOpacity: 1 }).bindTooltip("Bridgeport", { direction: "top" }).addTo(map);
       map.on("moveend zoomend", () => setViewRevision((value) => value + 1));
       mapRef.current = map;
@@ -142,7 +137,7 @@ export default function ForecastRadar() {
     const promote = () => {
       if (promoted) return;
       promoted = true;
-      next.setOpacity(0.62);
+      next.setOpacity(0.56);
       overlayRef.current = next;
       if (previous && previous !== next && map.hasLayer(previous)) map.removeLayer(previous);
     };
