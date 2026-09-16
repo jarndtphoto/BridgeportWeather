@@ -9,6 +9,7 @@ import ForecastRadar from "./components/ForecastRadar";
 import ThreatBanner from "./components/ThreatBanner";
 import AlertsList from "./components/AlertsList";
 import BottomNav from "./components/BottomNav";
+import CurrentConditionsIcon from "./components/CurrentConditionsIcon";
 import WeatherIcon, { forecastIconKind } from "./components/WeatherIcon";
 
 export const dynamic = "force-dynamic";
@@ -198,7 +199,7 @@ export default async function Home() {
                 <h2 id="conditions-title">Right now</h2>
                 {snapshot && <p className="stationObserved">{observedTime(snapshot.observedAt)}</p>}
               </div>
-              <WeatherIcon className="stationCurrentIcon" kind={currentIcon} />
+              <CurrentConditionsIcon className="stationCurrentIcon" kind={currentIcon} />
             </div>
           </div>
           <div className="grid stationGrid compactMetrics">
