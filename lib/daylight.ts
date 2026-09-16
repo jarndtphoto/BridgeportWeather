@@ -22,8 +22,13 @@ function deg(value: number) {
 export function sunriseSunsetFor(date: Date, lat: number, lon: number) {
   const day = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12));
   const jd = toJulian(day);
-  const n = Math.round(jd - 2_451_545.0009 - lon / 360);
-  const jStar = 2_451_545.0009 + lon / 360 + n;
+
+  // Solar-transit equations use west longitude as a positive angular offset.
+  // Our app coordinates use the normal geographic convention (Chicago is
+  // negative longitude), so flip the sign here before calculating transit.
+  const westLongitude = -lon;
+  const n = Math.round(jd - 2_451_545.0009 - westLongitude / 360);
+  const jStar = 2_451_545.0009 + westLongitude / 360 + n;
   const meanAnomaly = (357.5291 + 0.98560028 * (jStar - 2_451_545)) % 360;
   const c = 1.9148 * Math.sin(rad(meanAnomaly)) + 0.02 * Math.sin(rad(2 * meanAnomaly)) + 0.0003 * Math.sin(rad(3 * meanAnomaly));
   const eclipticLongitude = (meanAnomaly + c + 180 + 102.9372) % 360;
