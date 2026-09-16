@@ -2,7 +2,8 @@ import { getAmbientSnapshot, type AmbientSnapshot, type RawObservation } from ".
 import { getLocalForecast, type LocalForecast, type HourlyForecastPeriod } from "../lib/forecast";
 import { getHrrrModelInitUtc, getHrrrPointSample, hrrrForecastMinutesForTime, type HrrrPointSample } from "../lib/hrrr";
 import { forecastConsensus } from "../lib/forecastConsensus";
-import { getRadarFrames, getRadarPointReflectivity } from "../lib/radar";
+import { getRadarFrames, getRadarPointReflectivity, type RadarFrame } from "../lib/radar";
+import { assessStormEvolution, type StormEvolution } from "../lib/evolution";
 import RadarMap from "./components/RadarMap";
 import ForecastRadar from "./components/ForecastRadar";
 import ThreatBanner from "./components/ThreatBanner";
@@ -69,6 +70,11 @@ function stationRainActive(o: RawObservation | null) {
   return r !== null && r > 0.001;
 }
 
+function stationRainRate(o: RawObservation | null) {
+  if (!o) return null;
+  return numberValue(o, "rainratein") ?? numberValue(o, "rainrate") ?? numberValue(o, "hourlyrainin");
+}
+
 function consensusIcon(p: HourlyForecastPeriod, s: HrrrPointSample | null) {
   const c = forecastConsensus(p, s);
   const cloudy = forecastIconKind("Mostly Cloudy", p.icon);
@@ -93,6 +99,8 @@ export default async function Home() {
   let forecast: LocalForecast | null = null;
   let hrrrModelInitUtc: string | null = null;
   let liveRadarDbz: number | null = null;
+  let radarFrames: RadarFrame[] = [];
+  let radarEvolution: StormEvolution | null = null;
 
   const [a, f, h, r] = await Promise.allSettled([
     getAmbientSnapshot(),
@@ -105,8 +113,24 @@ export default async function Home() {
   if (f.status === "fulfilled") forecast = f.value;
   if (h.status === "fulfilled") hrrrModelInitUtc = h.value;
   if (r.status === "fulfilled" && r.value.length) {
+    radarFrames = r.value;
     const latest = r.value[r.value.length - 1];
     liveRadarDbz = await getRadarPointReflectivity(BRIDGEPORT_LAT, BRIDGEPORT_LON, latest.observedAt);
+  }
+
+  if (radarFrames.length) {
+    try {
+      // For the near-term cards, use radar motion on its own. Forecast guidance must not
+      // suppress an approaching echo that is already visible in current observations.
+      radarEvolution = await assessStormEvolution(
+        BRIDGEPORT_LAT,
+        BRIDGEPORT_LON,
+        radarFrames,
+        null,
+        stationRainRate(snapshot?.rawObservation ?? null),
+        null,
+      );
+    } catch {}
   }
 
   const metrics = snapshot
@@ -132,16 +156,20 @@ export default async function Home() {
   const current = nextSix[0] ?? null;
   const stationRaining = stationRainActive(snapshot?.rawObservation ?? null);
   const currentIcon = current ? observedCurrentIcon(current, liveRadarDbz, stationRaining) : forecastIconKind("Mostly Cloudy", null);
+  const radarApproaching = radarEvolution?.relevance === "nearby" && radarEvolution.motion === "approaching";
 
   const renderHour = (p: HourlyForecastPeriod, i: number) => {
-    const kind = i === 0 ? currentIcon : consensusIcon(p, samples[i] ?? null);
+    const radarNowcastHour = radarApproaching && i > 0 && i <= 2;
+    const kind = i === 0 ? currentIcon : radarNowcastHour ? forecastIconKind("Rain", p.icon, Math.max(50, p.precipitationChance ?? 0)) : consensusIcon(p, samples[i] ?? null);
+    const summary = radarNowcastHour ? "Rain approaching" : p.shortForecast;
+    const precipLine = radarNowcastHour ? "Live radar indicates approaching precipitation" : p.precipitationChance === null ? "Rain chance —" : `${p.precipitationChance}% rain`;
     return (
       <article className="forecastHour" key={p.startTime}>
         <span className="forecastHourTime">{forecastTime(p.startTime)}</span>
         <WeatherIcon className="forecastHourIcon" kind={kind} />
         <strong>{p.temperature}°</strong>
-        <span>{p.shortForecast}</span>
-        <small>{p.precipitationChance === null ? "Rain chance —" : `${p.precipitationChance}% rain`}</small>
+        <span>{summary}</span>
+        <small>{precipLine}</small>
         <small>{p.windDirection} {p.windSpeed}</small>
       </article>
     );
@@ -206,7 +234,7 @@ export default async function Home() {
         <h1 id="forecast-title">Forecast</h1>
         {nextSix.length ? (
           <>
-            <div className="sectionTitle"><h2>Next 6 Hours</h2><span>NWS + HRRR</span></div>
+            <div className="sectionTitle"><h2>Next 6 Hours</h2><span>NWS + HRRR + RADAR</span></div>
             <div className="forecastHours">{nextSix.map(renderHour)}</div>
             <div className="sectionTitle forecastOutlookTitle"><h2>Later outlook</h2><span>NWS</span></div>
             <div className="forecastOutlook">
