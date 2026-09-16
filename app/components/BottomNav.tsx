@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 const tabs = [
   ["tab-station", "Home"],
-  ["tab-radar", "Radar"],
+  ["tab-live", "Live"],
+  ["tab-future", "Future"],
   ["tab-forecast", "Forecast"],
 ] as const;
 
