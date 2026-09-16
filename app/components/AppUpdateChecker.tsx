@@ -4,8 +4,26 @@ import { useEffect } from "react";
 
 type VersionResponse = { version?: string };
 
+const CANONICAL_HOST = "bridgeport-weather-git-main-jarndtphoto.vercel.app";
+
 export default function AppUpdateChecker({ currentVersion }: { currentVersion: string }) {
   useEffect(() => {
+    // Deployment-specific Vercel URLs are immutable. If the app was added to the
+    // iOS Home Screen from one of those URLs, it would otherwise stay pinned to
+    // that old deployment forever. Move it onto the stable production alias so
+    // future launches and version checks always see current main.
+    if (
+      window.location.hostname.endsWith(".vercel.app") &&
+      window.location.hostname !== CANONICAL_HOST
+    ) {
+      const canonical = new URL(window.location.href);
+      canonical.protocol = "https:";
+      canonical.hostname = CANONICAL_HOST;
+      canonical.port = "";
+      window.location.replace(canonical.toString());
+      return;
+    }
+
     let checking = false;
 
     async function checkForUpdate() {
