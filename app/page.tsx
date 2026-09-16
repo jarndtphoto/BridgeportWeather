@@ -88,9 +88,17 @@ function consensusIcon(p: HourlyForecastPeriod, s: HrrrPointSample | null) {
   const wordingSaysRain = text.includes("rain") || text.includes("shower") || text.includes("drizzle");
   const wordingSaysHeavy = text.includes("heavy rain") || text.includes("heavy shower");
   const wordingSaysLight = text.includes("scattered") || text.includes("slight chance") || text.includes("chance") || text.includes("isolated") || text.includes("light rain") || text.includes("drizzle");
+  const pop = p.precipitationChance ?? 0;
+  const hrrrDry = s?.precipitation === false || s?.intensity === "none";
 
-  // If the NWS wording explicitly says rain/showers, always keep a rain-family icon.
-  // HRRR can increase the intensity, but a dry model sample must not turn a rainy card into a plain cloud.
+  // A sub-30% NWS rain chance should not force a rain icon when the point HRRR forecast is dry over Bridgeport.
+  // Keep the probability text on the card, but show the underlying cloudy sky state instead.
+  if (wordingSaysRain && pop < 30 && hrrrDry) {
+    return forecastIconKind("Mostly Cloudy", p.icon, null, night);
+  }
+
+  // If the NWS wording explicitly says rain/showers at 30%+, keep a rain-family icon.
+  // HRRR can increase the intensity, but a dry model sample must not turn a meaningful rainy card into a plain cloud.
   if (wordingSaysRain) {
     if (wordingSaysHeavy || s?.intensity === "strong") return forecastIconKind("Heavy Rain", p.icon, p.precipitationChance, night);
     if (s?.intensity === "moderate" && !wordingSaysLight) return forecastIconKind("Rain", p.icon, p.precipitationChance, night);
