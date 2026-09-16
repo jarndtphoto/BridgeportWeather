@@ -55,6 +55,15 @@ function Cloud({ dark = false, x = 18, y = 31, scale = 1 }: { dark?: boolean; x?
   </g>;
 }
 
+function LightRainCloud({ x = 12, y = 26, scale = 1.05 }: { x?: number; y?: number; scale?: number }) {
+  return <g transform={`translate(${x} ${y}) scale(${scale})`}>
+    <ellipse cx="28" cy="22" rx="26" ry="15" fill="url(#lightRainCloud)"/>
+    <circle cx="18" cy="16" r="13" fill="url(#lightRainCloud)"/>
+    <circle cx="34" cy="11" r="17" fill="url(#lightRainCloud)"/>
+    <circle cx="49" cy="18" r="13" fill="url(#lightRainCloud)"/>
+  </g>;
+}
+
 function Drops({ count = 4 }: { count?: number }) {
   const xs = count === 2 ? [36, 59] : count === 3 ? [30, 49, 68] : count === 5 ? [24, 37, 50, 63, 76] : [28, 43, 58, 73];
   return <g>{xs.map((x, i) => <path key={i} d={`M${x} 66c-5 7-7 10-7 14a7 7 0 0 0 14 0c0-4-2-7-7-14Z`} fill="url(#rain)"/>)}</g>;
@@ -67,6 +76,7 @@ export default function WeatherIcon({ kind, className = "" }: { kind: IconKind; 
     <defs>
       <radialGradient id="sun" cx="38%" cy="35%"><stop offset="0" stopColor="#fff69a"/><stop offset=".55" stopColor="#ffd42a"/><stop offset="1" stopColor="#ff9c16"/></radialGradient>
       <linearGradient id="cloud" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#f7fbff"/><stop offset=".55" stopColor="#b8d8ff"/><stop offset="1" stopColor="#78aee8"/></linearGradient>
+      <linearGradient id="lightRainCloud" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#ffffff"/><stop offset=".58" stopColor="#eef7ff"/><stop offset="1" stopColor="#cfe8ff"/></linearGradient>
       <linearGradient id="darkCloud" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#7d95b9"/><stop offset=".55" stopColor="#506b96"/><stop offset="1" stopColor="#30476c"/></linearGradient>
       <linearGradient id="rain" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#65d2ff"/><stop offset="1" stopColor="#1687ff"/></linearGradient>
       <linearGradient id="moon" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#fff2a7"/><stop offset="1" stopColor="#ffca5f"/></linearGradient>
@@ -85,7 +95,8 @@ export default function WeatherIcon({ kind, className = "" }: { kind: IconKind; 
     {kind === "mostly-cloudy-night" && <><Cloud dark x={32} y={33} scale={.8}/><Cloud dark x={13} y={45} scale={.95}/></>}
 
     {kind === "chance-thunderstorms" && <><Cloud x={13} y={30} scale={1.02}/><path d="M59 58 51 72h8l-5 13 16-20h-8l6-7Z" fill="#ffd41f" stroke="#ffad00" strokeWidth="1.2"/><Drops count={2}/></>}
-    {["light-rain","rain","heavy-rain","thunderstorms","severe-storms"].includes(kind) && <Cloud dark={cloudDark} x={12} y={26} scale={1.05}/>} 
+    {kind === "light-rain" && <LightRainCloud/>}
+    {["rain","heavy-rain","thunderstorms","severe-storms"].includes(kind) && <Cloud dark={cloudDark} x={12} y={26} scale={1.05}/>} 
     {kind === "light-rain" && <Drops count={2}/>} 
     {kind === "rain" && <Drops count={4}/>} 
     {kind === "heavy-rain" && <Drops count={5}/>} 
