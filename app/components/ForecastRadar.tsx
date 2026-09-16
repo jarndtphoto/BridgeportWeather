@@ -13,9 +13,6 @@ const FORECAST_WINDOW_MINUTES = 360;
 
 type MetaPayload = { modelInitUtc: string | null };
 type ForecastLayer = "precipitation" | "clouds";
-type RadarFrame = { observedAt: string };
-type Motion = "approaching" | "movingAway" | "passingNearby" | "stationaryOrUnclear" | "unknown";
-type Evolution = { motion: Motion; strongestSector: string | null; comparisonMinutes: number | null };
 
 function timeLabel(value: string) {
   return new Intl.DateTimeFormat("en-US", {
@@ -27,7 +24,7 @@ function timeLabel(value: string) {
 }
 
 function validTimeLabel(init: string | null, min: number) {
-  if (!init) return min === 0 ? "Current" : "Forecast";
+  if (!init) return "Forecast";
   return timeLabel(new Date(Date.parse(init) + min * 60_000).toISOString());
 }
 
@@ -40,7 +37,7 @@ function checkedLabel(value: string | null) {
 }
 
 function relativeLabel(m: number) {
-  if (m === 0) return "Current";
+  if (m === 0) return "Nearest forecast";
   const h = Math.floor(m / 60);
   const r = m % 60;
   return !h ? `+${r} min` : !r ? `+${h} hr` : `+${h} hr ${r} min`;
@@ -49,36 +46,6 @@ function relativeLabel(m: number) {
 function iemRunId(v: string) {
   const d = new Date(v);
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}${String(d.getUTCHours()).padStart(2, "0")}00`;
-}
-
-function sectorBearing(label: string | null) {
-  return ({ N: 0, NE: 45, E: 90, SE: 135, S: 180, SW: 225, W: 270, NW: 315 } as Record<string, number>)[label ?? ""] ?? null;
-}
-
-function shiftedPoint(lat: number, lon: number, bearingDeg: number, miles: number) {
-  const r = 3958.8;
-  const a = miles / r;
-  const b = bearingDeg * Math.PI / 180;
-  const lat1 = lat * Math.PI / 180;
-  const lon1 = lon * Math.PI / 180;
-  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(a) + Math.cos(lat1) * Math.sin(a) * Math.cos(b));
-  const lon2 = lon1 + Math.atan2(Math.sin(b) * Math.sin(a) * Math.cos(lat1), Math.cos(a) - Math.sin(lat1) * Math.sin(lat2));
-  return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI] as [number, number];
-}
-
-function motionShift(evolution: Evolution | null, relative: number) {
-  if (!evolution || relative <= 0 || relative > 45) return null;
-  const sector = sectorBearing(evolution.strongestSector);
-  if (sector === null) return null;
-
-  let bearing: number | null = null;
-  if (evolution.motion === "approaching") bearing = (sector + 180) % 360;
-  else if (evolution.motion === "movingAway") bearing = sector;
-  else return null;
-
-  const comparison = evolution.comparisonMinutes && evolution.comparisonMinutes > 0 ? evolution.comparisonMinutes : 10;
-  const mph = Math.max(8, Math.min(40, (4 / comparison) * 60));
-  return { bearing, miles: mph * (relative / 60) };
 }
 
 export default function ForecastRadar() {
@@ -94,8 +61,6 @@ export default function ForecastRadar() {
   const [forecastLayer, setForecastLayer] = useState<ForecastLayer>("precipitation");
   const [mapReady, setMapReady] = useState(false);
   const [modelInitUtc, setModelInitUtc] = useState<string | null>(null);
-  const [latestObservedAt, setLatestObservedAt] = useState<string | null>(null);
-  const [evolution, setEvolution] = useState<Evolution | null>(null);
   const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [touchMap, setTouchMap] = useState(false);
   const [mapInteraction, setMapInteraction] = useState(false);
@@ -120,19 +85,11 @@ export default function ForecastRadar() {
     let active = true;
     async function load() {
       try {
-        const [m, r, t] = await Promise.all([
-          fetch(`/api/forecast-radar/meta?t=${Date.now()}`, { cache: "no-store" }),
-          fetch(`/api/radar/frames?t=${Date.now()}`, { cache: "no-store" }),
-          fetch(`/api/threat?t=${Date.now()}`, { cache: "no-store" }),
-        ]);
-        const mp = (m.ok ? await m.json() : null) as MetaPayload | null;
-        const rp = r.ok ? await r.json() as { frames: RadarFrame[] } : null;
-        const tp = t.ok ? await t.json() as { evolution?: Evolution } : null;
+        const response = await fetch(`/api/forecast-radar/meta?t=${Date.now()}`, { cache: "no-store" });
+        const payload = (response.ok ? await response.json() : null) as MetaPayload | null;
         if (!active) return;
-        setModelInitUtc(mp?.modelInitUtc ?? null);
-        setLatestObservedAt(rp?.frames?.at(-1)?.observedAt ?? null);
-        setEvolution(tp?.evolution ?? null);
-        if (m.ok) setCheckedAt(new Date().toISOString());
+        setModelInitUtc(payload?.modelInitUtc ?? null);
+        if (response.ok) setCheckedAt(new Date().toISOString());
       } catch {}
     }
     void load();
@@ -151,7 +108,8 @@ export default function ForecastRadar() {
   useEffect(() => {
     setFrameIndex(0);
     setPlaying(false);
-  }, [modelInitUtc]);
+    clearWeatherLayers();
+  }, [modelInitUtc, clearWeatherLayers]);
 
   useEffect(() => {
     const input = document.getElementById("tab-future") as HTMLInputElement | null;
@@ -195,9 +153,6 @@ export default function ForecastRadar() {
       map.createPane("weather");
       map.getPane("weather")!.style.zIndex = "400";
       map.getPane("weather")!.style.pointerEvents = "none";
-      map.createPane("nowcast");
-      map.getPane("nowcast")!.style.zIndex = "410";
-      map.getPane("nowcast")!.style.pointerEvents = "none";
       const isTouch = matchMedia("(pointer: coarse)").matches;
       if (isTouch) map.dragging.disable();
       setTouchMap(isTouch);
@@ -242,16 +197,14 @@ export default function ForecastRadar() {
   useEffect(() => {
     const map = mapRef.current;
     const L = leafletRef.current;
-    if (!map || !L || !mapReady || !tabActive) return;
+    if (!map || !L || !mapReady || !tabActive || !modelInitUtc) return;
 
     const token = ++renderTokenRef.current;
     removeLayers(pendingLayersRef.current);
     pendingLayersRef.current = [];
 
     const frameMinutes = forecastMinutes[frameIndex];
-    const relative = Math.max(0, frameMinutes - forecastMinutes[0]);
     const pending: Layer[] = [];
-    const opacityTargets = new Map<Layer, number>();
 
     const promote = () => {
       if (token !== renderTokenRef.current) {
@@ -259,72 +212,12 @@ export default function ForecastRadar() {
         return;
       }
       removeLayers(currentLayersRef.current);
-      for (const layer of pending) {
-        const target = opacityTargets.get(layer);
-        if (typeof target === "number") (layer as any).setOpacity?.(target);
-      }
+      for (const layer of pending) (layer as any).setOpacity?.(forecastLayer === "clouds" ? 0.9 : 0.82);
       currentLayersRef.current = [...pending];
       pendingLayersRef.current = [];
     };
 
     if (forecastLayer === "precipitation") {
-      if (!modelInitUtc || !latestObservedAt) return;
-
-      const bounds = map.getBounds();
-      const sw = L.CRS.EPSG3857.project(bounds.getSouthWest());
-      const ne = L.CRS.EPSG3857.project(bounds.getNorthEast());
-      const size = map.getSize();
-      if (size.x < 100 || size.y < 100) return;
-      const scale = Math.max(1, Math.min(3, 1800 / size.x, 1800 / size.y));
-      const params = new URLSearchParams({
-        bbox: `${sw.x},${sw.y},${ne.x},${ne.y}`,
-        width: String(Math.round(size.x * scale)),
-        height: String(Math.round(size.y * scale)),
-        time: latestObservedAt,
-      });
-
-      if (relative <= 45) {
-        let overlayBounds = bounds;
-        const shift = motionShift(evolution, relative);
-        if (shift) {
-          const s = shiftedPoint(bounds.getSouth(), bounds.getWest(), shift.bearing, shift.miles);
-          const n = shiftedPoint(bounds.getNorth(), bounds.getEast(), shift.bearing, shift.miles);
-          overlayBounds = L.latLngBounds(L.latLng(s[0], s[1]), L.latLng(n[0], n[1]));
-        }
-
-        const live: any = L.imageOverlay(`/api/radar/image?${params}`, overlayBounds, { opacity: 0, pane: "nowcast", interactive: false }).addTo(map);
-        pending.push(live);
-        opacityTargets.set(live, 0.78);
-
-        if (relative > 0) {
-          const frame = String(frameMinutes).padStart(4, "0");
-          const run = iemRunId(modelInitUtc);
-          const model: any = L.tileLayer(`https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/hrrr::REFP-F${frame}-${run}/{z}/{x}/{y}.png`, {
-            pane: "weather",
-            opacity: 0,
-            maxZoom: 12,
-            attribution: "HRRR via Iowa Environmental Mesonet",
-          }).addTo(map);
-          pending.unshift(model);
-          opacityTargets.set(model, 0.28);
-        }
-
-        pendingLayersRef.current = [...pending];
-        let done = false;
-        const ready = () => {
-          if (done) return;
-          done = true;
-          promote();
-        };
-        live.once("load", ready);
-        const fallback = window.setTimeout(ready, 1000);
-        return () => {
-          window.clearTimeout(fallback);
-          live.off("load", ready);
-          if (token !== renderTokenRef.current) removeLayers(pending);
-        };
-      }
-
       const frame = String(frameMinutes).padStart(4, "0");
       const run = iemRunId(modelInitUtc);
       const model: any = L.tileLayer(`https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/hrrr::REFP-F${frame}-${run}/{z}/{x}/{y}.png`, {
@@ -334,7 +227,6 @@ export default function ForecastRadar() {
         attribution: "HRRR via Iowa Environmental Mesonet",
       }).addTo(map);
       pending.push(model);
-      opacityTargets.set(model, 0.82);
       pendingLayersRef.current = [...pending];
       let done = false;
       const ready = () => {
@@ -351,7 +243,6 @@ export default function ForecastRadar() {
       };
     }
 
-    if (!modelInitUtc) return;
     const bounds = map.getBounds();
     const sw = L.CRS.EPSG3857.project(bounds.getSouthWest());
     const ne = L.CRS.EPSG3857.project(bounds.getNorthEast());
@@ -366,7 +257,6 @@ export default function ForecastRadar() {
     });
     const image: any = L.imageOverlay(`/api/forecast-cloud/image?${params}`, bounds, { opacity: 0, pane: "weather", interactive: false }).addTo(map);
     pending.push(image);
-    opacityTargets.set(image, 0.9);
     pendingLayersRef.current = [...pending];
     let done = false;
     const ready = () => {
@@ -381,7 +271,7 @@ export default function ForecastRadar() {
       image.off("load", ready);
       if (token !== renderTokenRef.current) removeLayers(pending);
     };
-  }, [forecastMinutes, frameIndex, forecastLayer, mapReady, modelInitUtc, latestObservedAt, evolution, viewRevision, tabActive, removeLayers]);
+  }, [forecastMinutes, frameIndex, forecastLayer, mapReady, modelInitUtc, viewRevision, tabActive, removeLayers]);
 
   useEffect(() => {
     if (!playing || !tabActive || mapInteraction || forecastMinutes.length < 2) return;
@@ -415,10 +305,6 @@ export default function ForecastRadar() {
     }
   };
 
-  const sourceLabel = forecastLayer === "precipitation"
-    ? (relativeMinutes === 0 ? "Live MRMS observation" : relativeMinutes <= 45 ? "Radar-motion nowcast + HRRR" : "HRRR forecast")
-    : "HRRR cloud forecast";
-
   return (
     <div className="forecastRadarPlayer">
       <p className="radarSource" style={{ margin: "0 2px 10px" }}>{runLabel(modelInitUtc)} · {checkedLabel(checkedAt)}</p>
@@ -430,8 +316,8 @@ export default function ForecastRadar() {
         <div ref={containerRef} className={`radarMap forecastRadarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} />
         {touchMap && <button type="button" className="mapInteractionButton" onClick={() => { if (!mapInteraction) setPlaying(false); setMapInteraction((v) => !v); }}>{mapInteraction ? "Done" : "Move map"}</button>}
         <div className="radarReadout">
-          <strong>{frameIndex === 0 ? "Current" : validTimeLabel(modelInitUtc, displayMinutes)}</strong>
-          <span>{relativeLabel(relativeMinutes)} · {sourceLabel} · {runLabel(modelInitUtc)}</span>
+          <strong>{validTimeLabel(modelInitUtc, displayMinutes)}</strong>
+          <span>{relativeLabel(relativeMinutes)} · HRRR forecast only · {runLabel(modelInitUtc)}</span>
         </div>
       </div>
       <div className="radarControls">
@@ -439,7 +325,7 @@ export default function ForecastRadar() {
         <input type="range" min="0" max={forecastMinutes.length - 1} value={frameIndex} step={forecastLayer === "clouds" ? 4 : 1} onChange={(e) => { setPlaying(false); setFrameIndex(Number(e.target.value)); }} />
         <button type="button" className="newestButton" onClick={() => { setPlaying(false); setFrameIndex(0); }}>Current</button>
       </div>
-      <p className="radarSource">{forecastLayer === "precipitation" ? "Current is live NOAA/NWS MRMS. The first 45 minutes use discrete radar-motion nowcast frames with HRRR guidance; the live image is no longer faded across future frames." : "NOAA/NCEP HRRR total cloud cover via NOMADS · hourly cloud fields · model guidance"}</p>
+      <p className="radarSource">{forecastLayer === "precipitation" ? "NOAA/NCEP HRRR composite reflectivity forecast only. Live MRMS radar is not used anywhere on Future Radar." : "NOAA/NCEP HRRR total cloud cover via NOMADS · hourly cloud fields · model guidance"}</p>
     </div>
   );
 }
