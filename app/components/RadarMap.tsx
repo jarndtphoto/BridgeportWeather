@@ -11,10 +11,21 @@ const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
 const BASEMAP = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const BASEMAP_ATTRIBUTION = "&copy; OpenStreetMap contributors";
 const GOES_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes_east.cgi";
+const LIVE_FADE_MS = 320;
 
 function frameLabel(value?: string) {
   if (!value) return "Waiting for NOAA";
   return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" }).format(new Date(value));
+}
+
+function fadeLayer(layer: ImageOverlay, targetOpacity: number) {
+  const started = performance.now();
+  const tick = (now: number) => {
+    const progress = Math.min(1, (now - started) / LIVE_FADE_MS);
+    layer.setOpacity(targetOpacity * progress);
+    if (progress < 1) window.requestAnimationFrame(tick);
+  };
+  window.requestAnimationFrame(tick);
 }
 
 export default function RadarMap() {
@@ -22,6 +33,7 @@ export default function RadarMap() {
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<typeof Leaflet | null>(null);
   const radarLayerRef = useRef<ImageOverlay | null>(null);
+  const renderTokenRef = useRef(0);
   const frameIndexRef = useRef(0);
   const [frames, setFrames] = useState<RadarFrame[]>([]);
   const [frameIndex, setFrameIndex] = useState(0);
@@ -159,24 +171,37 @@ export default function RadarMap() {
       opacity = 0.58;
     }
 
-    const previous = radarLayerRef.current;
+    const token = ++renderTokenRef.current;
     const next = L.imageOverlay(url, bounds, { opacity: 0, pane: "weather", interactive: false }).addTo(map);
     let promoted = false;
+    let removalTimer: number | null = null;
+
     const promote = () => {
       if (promoted) return;
       promoted = true;
-      next.setOpacity(opacity);
+      if (token !== renderTokenRef.current) {
+        if (map.hasLayer(next)) map.removeLayer(next);
+        return;
+      }
+      const previous = radarLayerRef.current;
       radarLayerRef.current = next;
-      if (previous && previous !== next && map.hasLayer(previous)) map.removeLayer(previous);
+      fadeLayer(next, opacity);
+      removalTimer = window.setTimeout(() => {
+        if (previous && previous !== next && map.hasLayer(previous)) map.removeLayer(previous);
+      }, LIVE_FADE_MS + 60);
     };
-    const discard = () => { if (map.hasLayer(next)) map.removeLayer(next); };
+
+    const discard = () => {
+      if (map.hasLayer(next)) map.removeLayer(next);
+    };
 
     next.once("load", promote);
     next.once("error", discard);
     return () => {
       next.off("load", promote);
       next.off("error", discard);
-      if (radarLayerRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
+      if (removalTimer !== null) window.clearTimeout(removalTimer);
+      if (token !== renderTokenRef.current && radarLayerRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
     };
   }, [frames, frameIndex, liveLayer, mapReady, viewRevision, cloudRevision]);
 
