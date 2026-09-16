@@ -8,6 +8,7 @@ type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
 type RadarPayload = { frames: RadarFrame[] };
 type LiveLayer = "precipitation" | "clouds";
 const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
+const DEFAULT_ZOOM = 8;
 const BASEMAP = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const BASEMAP_ATTRIBUTION = "&copy; OpenStreetMap contributors";
 const GOES_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes_east.cgi";
@@ -48,6 +49,19 @@ export default function RadarMap() {
 
   useEffect(() => { frameIndexRef.current = frameIndex; }, [frameIndex]);
 
+  const resetLiveView = useCallback(() => {
+    setPlaying(false);
+    setMapInteraction(false);
+    setFrameIndex(Math.max(0, frames.length - 1));
+    const map = mapRef.current;
+    if (!map) return;
+    map.setView(LOCAL_TARGET, DEFAULT_ZOOM, { animate: false });
+    window.requestAnimationFrame(() => {
+      map.invalidateSize(false);
+      setViewRevision((value) => value + 1);
+    });
+  }, [frames.length]);
+
   const loadFrames = useCallback(async () => {
     try {
       const response = await fetch("/api/radar/frames", { cache: "no-store" });
@@ -71,6 +85,21 @@ export default function RadarMap() {
   }, [loadFrames]);
 
   useEffect(() => {
+    const input = document.getElementById("tab-live") as HTMLInputElement | null;
+    if (!input) return;
+    const sync = () => {
+      if (!input.checked) {
+        setPlaying(false);
+        return;
+      }
+      resetLiveView();
+    };
+    sync();
+    input.addEventListener("change", sync);
+    return () => input.removeEventListener("change", sync);
+  }, [resetLiveView]);
+
+  useEffect(() => {
     if (liveLayer !== "clouds") return;
     const refresh = window.setInterval(() => setCloudRevision((value) => value + 1), 60_000);
     return () => window.clearInterval(refresh);
@@ -82,7 +111,7 @@ export default function RadarMap() {
       if (!active || !containerRef.current || mapRef.current) return;
       const L = module.default;
       leafletRef.current = L;
-      const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(LOCAL_TARGET, 8);
+      const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(LOCAL_TARGET, DEFAULT_ZOOM);
       map.createPane("weather");
       map.getPane("weather")!.style.zIndex = "400";
       map.getPane("weather")!.style.pointerEvents = "none";
@@ -215,8 +244,18 @@ export default function RadarMap() {
   const isNewest = frameIndex === frames.length - 1;
   const setLayer = (layer: LiveLayer) => {
     setPlaying(false);
+    setMapInteraction(false);
+    setFrameIndex(Math.max(0, frames.length - 1));
     setLiveLayer(layer);
-    if (layer === "precipitation") setFrameIndex(Math.max(0, frames.length - 1));
+    if (layer === "clouds") setCloudRevision((value) => value + 1);
+    const map = mapRef.current;
+    if (map) {
+      map.setView(LOCAL_TARGET, DEFAULT_ZOOM, { animate: false });
+      window.requestAnimationFrame(() => {
+        map.invalidateSize(false);
+        setViewRevision((value) => value + 1);
+      });
+    }
   };
   const toggleMapInteraction = () => {
     if (!mapInteraction) setPlaying(false);
