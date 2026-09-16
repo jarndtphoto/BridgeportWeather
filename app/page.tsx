@@ -150,7 +150,8 @@ export default async function Home() {
   return (
     <main>
       <input className="tabInput" type="radio" id="tab-station" name="screen" defaultChecked />
-      <input className="tabInput" type="radio" id="tab-radar" name="screen" />
+      <input className="tabInput" type="radio" id="tab-live" name="screen" />
+      <input className="tabInput" type="radio" id="tab-future" name="screen" />
       <input className="tabInput" type="radio" id="tab-forecast" name="screen" />
 
       <section className="tabPanel stationPanel homePanel" aria-labelledby="home-title">
@@ -184,25 +185,20 @@ export default async function Home() {
         </section>
       </section>
 
-      <section className="tabPanel radarPanel" aria-labelledby="radar-title">
-        <p className="eyebrow">BRIDGEPORT · CHICAGO</p>
-        <h1 id="radar-title">Radar</h1>
+      <section className="tabPanel liveRadarPanel radarFullscreenPanel" aria-labelledby="live-radar-page-title">
+        <div className="radarPageHeader">
+          <p className="eyebrow">BRIDGEPORT · CHICAGO</p>
+          <h1 id="live-radar-page-title">Live Radar</h1>
+        </div>
+        <RadarMap />
+      </section>
 
-        <section className="radarProductSection" aria-labelledby="live-radar-title">
-          <div className="sectionTitle radarHeading">
-            <div><p className="kicker">LIVE OBSERVATIONS</p><h2 id="live-radar-title">Live Radar</h2></div>
-            <span>NOAA LIVE</span>
-          </div>
-          <RadarMap />
-        </section>
-
-        <section className="radarProductSection forecastRadarSection" aria-labelledby="forecast-radar-title">
-          <div className="sectionTitle radarHeading">
-            <div><p className="kicker">FORECAST GUIDANCE</p><h2 id="forecast-radar-title">6-Hour Forecast Radar</h2></div>
-            <span>HRRR + NWS</span>
-          </div>
-          <ForecastRadar />
-        </section>
+      <section className="tabPanel futureRadarPanel radarFullscreenPanel" aria-labelledby="future-radar-page-title">
+        <div className="radarPageHeader">
+          <p className="eyebrow">BRIDGEPORT · CHICAGO</p>
+          <h1 id="future-radar-page-title">Future Radar</h1>
+        </div>
+        <ForecastRadar />
       </section>
 
       <section className="tabPanel forecastPanel" aria-labelledby="forecast-title">
