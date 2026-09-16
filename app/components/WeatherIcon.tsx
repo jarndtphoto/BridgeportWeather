@@ -10,6 +10,10 @@ type IconKind =
   | "light-rain-night"
   | "rain-night"
   | "heavy-rain-night"
+  | "light-snow-night"
+  | "heavy-snow-night"
+  | "cloudy-night"
+  | "overcast-night"
   | "chance-thunderstorms"
   | "thunderstorms"
   | "severe-storms"
@@ -24,9 +28,9 @@ type IconKind =
   | "partly-cloudy-night"
   | "mostly-cloudy-night";
 
-export function forecastIconKind(shortForecast: string, iconUrl: string | null, precipitationChance: number | null = null): IconKind {
+export function forecastIconKind(shortForecast: string, iconUrl: string | null, precipitationChance: number | null = null, nightOverride: boolean | null = null): IconKind {
   const text = shortForecast.toLowerCase();
-  const night = iconUrl?.includes("/night/") ?? false;
+  const night = nightOverride ?? (iconUrl?.includes("/night/") ?? false);
   const probabilistic = text.includes("chance") || text.includes("likely") || text.includes("possible") || text.includes("isolated") || text.includes("scattered");
   if (text.includes("severe") && (text.includes("storm") || text.includes("thunder"))) return "severe-storms";
   if (text.includes("thunder")) return probabilistic ? "chance-thunderstorms" : "thunderstorms";
@@ -34,7 +38,8 @@ export function forecastIconKind(shortForecast: string, iconUrl: string | null, 
   if (text.includes("sleet")) return "sleet";
   if (text.includes("wintry") || (text.includes("snow") && text.includes("rain"))) return "wintry-mix";
   if (text.includes("blowing snow")) return "blowing-snow";
-  if (text.includes("snow")) return "snow";
+  if (text.includes("heavy snow") || text.includes("snow squall")) return night ? "heavy-snow-night" : "snow";
+  if (text.includes("snow")) return night ? "light-snow-night" : "snow";
   if (text.includes("heavy rain") || text.includes("heavy showers")) return night ? "heavy-rain-night" : "heavy-rain";
   if (text.includes("light rain") || text.includes("drizzle") || (text.includes("slight chance") && text.includes("rain"))) return night ? "light-rain-night" : "light-rain";
   if (text.includes("rain") || text.includes("showers")) {
@@ -43,10 +48,10 @@ export function forecastIconKind(shortForecast: string, iconUrl: string | null, 
   }
   if (text.includes("fog") || text.includes("haze") || text.includes("mist")) return "fog";
   if (text.includes("windy") || text.includes("breezy")) return "windy";
-  if (text.includes("overcast")) return "overcast";
-  if (text.includes("mostly cloudy")) return night ? "mostly-cloudy-night" : "mostly-cloudy";
-  if (text.includes("partly cloudy") || text.includes("partly sunny")) return night ? "partly-cloudy-night" : "partly-cloudy";
-  if (text.includes("cloudy")) return "cloudy";
+  if (text.includes("overcast")) return night ? "overcast-night" : "overcast";
+  if (text.includes("mostly cloudy")) return night ? "cloudy-night" : "mostly-cloudy";
+  if (text.includes("partly cloudy") || text.includes("partly sunny")) return night ? "cloudy-night" : "partly-cloudy";
+  if (text.includes("cloudy")) return night ? "cloudy-night" : "cloudy";
   if (night) return "clear-night";
   return "sunny";
 }
@@ -66,10 +71,17 @@ function Drops({ count = 4 }: { count?: number }) {
   return <g>{xs.map((x, i) => <path key={i} d={`M${x} 66c-5 7-7 10-7 14a7 7 0 0 0 14 0c0-4-2-7-7-14Z`} fill="url(#rain)"/>)}</g>;
 }
 
+function Snowflakes({ count }: { count: 2 | 5 }) {
+  const xs = count === 2 ? [38, 62] : [22, 36, 50, 64, 78];
+  return <g fill="#d9eeff" fontSize={count === 2 ? 17 : 14} fontWeight="700">{xs.map((x, i) => <text key={i} x={x - 6} y={count === 2 ? 87 : 82 + (i % 2) * 7}>✣</text>)}</g>;
+}
+
 export default function WeatherIcon({ kind, className = "" }: { kind: IconKind; className?: string }) {
   const night = kind.includes("night");
   const cloudDark = ["heavy-rain","thunderstorms","severe-storms","overcast"].includes(kind);
   const nightRain = ["light-rain-night","rain-night","heavy-rain-night"].includes(kind);
+  const nightSnow = ["light-snow-night","heavy-snow-night"].includes(kind);
+  const nightCloud = ["cloudy-night","overcast-night"].includes(kind);
   return <svg className={className} viewBox="0 0 100 100" role="img" aria-label={kind.replaceAll("-", " ")}>
     <defs>
       <radialGradient id="sun" cx="38%" cy="35%"><stop offset="0" stopColor="#fff69a"/><stop offset=".55" stopColor="#ffd42a"/><stop offset="1" stopColor="#ff9c16"/></radialGradient>
@@ -82,18 +94,20 @@ export default function WeatherIcon({ kind, className = "" }: { kind: IconKind; 
 
     {kind === "sunny" && <g filter="url(#glow)"><g stroke="#ffb111" strokeWidth="4" strokeLinecap="round">{[[50,8,50,18],[50,82,50,92],[8,50,18,50],[82,50,92,50],[20,20,27,27],[73,73,80,80],[20,80,27,73],[73,27,80,20]].map((v,i)=><line key={i} x1={v[0]} y1={v[1]} x2={v[2]} y2={v[3]}/>)}</g><circle cx="50" cy="50" r="25" fill="url(#sun)"/></g>}
 
-    {night && <g filter="url(#glow)"><path d="M57 18a26 26 0 1 0 20 43A22 22 0 0 1 57 18Z" fill="url(#moon)"/>{kind === "clear-night" && <g fill="#ffe88b"><circle cx="76" cy="23" r="2"/><circle cx="82" cy="37" r="1.6"/><circle cx="67" cy="31" r="1.4"/></g>}</g>}
+    {night && <g filter="url(#glow)"><path d="M57 18a26 26 0 1 0 20 43A22 22 0 0 1 57 18Z" fill="url(#moon)"/></g>}
 
     {kind === "partly-cloudy" && <><g filter="url(#glow)"><circle cx="35" cy="32" r="20" fill="url(#sun)"/></g><Cloud x={22} y={35} scale={.95}/></>}
     {kind === "mostly-cloudy" && <><Cloud x={30} y={20} scale={.9}/><Cloud x={12} y={38} scale={.95}/></>}
     {kind === "cloudy" && <><Cloud x={24} y={22} scale={.9}/><Cloud x={9} y={39} scale={1.02}/></>}
     {kind === "overcast" && <><Cloud dark x={24} y={22} scale={.9}/><Cloud dark x={9} y={39} scale={1.02}/></>}
-    {kind === "partly-cloudy-night" && <Cloud x={23} y={43} scale={.9}/>} 
+    {kind === "partly-cloudy-night" && <Cloud dark x={23} y={43} scale={.9}/>} 
     {kind === "mostly-cloudy-night" && <><Cloud dark x={32} y={33} scale={.8}/><Cloud dark x={13} y={45} scale={.95}/></>}
+    {kind === "cloudy-night" && <><Cloud dark x={24} y={29} scale={.88}/><Cloud dark x={9} y={45} scale={1.02}/></>}
+    {kind === "overcast-night" && <><Cloud dark x={20} y={26} scale={.96}/><Cloud dark x={7} y={43} scale={1.08}/></>}
 
     {kind === "chance-thunderstorms" && <><Cloud x={13} y={30} scale={1.02}/><path d="M59 58 51 72h8l-5 13 16-20h-8l6-7Z" fill="#ffd41f" stroke="#ffad00" strokeWidth="1.2"/><Drops count={2}/></>}
     {["light-rain","rain","heavy-rain","thunderstorms","severe-storms"].includes(kind) && <Cloud dark={cloudDark} x={12} y={26} scale={1.05}/>} 
-    {nightRain && <Cloud dark x={12} y={26} scale={1.05}/>} 
+    {nightRain && <Cloud dark x={12} y={31} scale={1.05}/>} 
     {kind === "light-rain" && <Drops count={2}/>} 
     {kind === "rain" && <Drops count={4}/>} 
     {kind === "heavy-rain" && <Drops count={5}/>} 
@@ -102,7 +116,10 @@ export default function WeatherIcon({ kind, className = "" }: { kind: IconKind; 
     {kind === "heavy-rain-night" && <Drops count={5}/>} 
     {(kind === "thunderstorms" || kind === "severe-storms") && <><Drops count={kind === "severe-storms" ? 5 : 3}/><path d="M54 56 43 75h10l-7 18 22-27H57l8-10Z" fill="#ffd41f" stroke="#ffad00" strokeWidth="1.5"/></>}
 
-    {kind === "snow" && <><Cloud x={12} y={25} scale={1.05}/><g fill="#d9eeff" fontSize="18" fontWeight="700"><text x="25" y="84">✣</text><text x="47" y="89">✣</text><text x="68" y="82">✣</text></g></>}
+    {kind === "snow" && <><Cloud x={12} y={25} scale={1.05}/><Snowflakes count={5}/></>}
+    {nightSnow && <Cloud dark x={12} y={31} scale={1.05}/>} 
+    {kind === "light-snow-night" && <Snowflakes count={2}/>} 
+    {kind === "heavy-snow-night" && <Snowflakes count={5}/>} 
     {kind === "wintry-mix" && <><Cloud x={12} y={25} scale={1.05}/><g fill="#d9eeff" fontSize="15" fontWeight="700"><text x="25" y="84">✣</text></g><Drops count={3}/></>}
     {kind === "blowing-snow" && <><g stroke="#a8d7ff" strokeWidth="6" strokeLinecap="round" fill="none"><path d="M15 42h54c13 0 14-18 3-18-7 0-9 5-9 9"/><path d="M20 58h62c10 0 11 15 1 15-5 0-7-4-7-7"/></g><g fill="#d9eeff" fontSize="14"><text x="22" y="88">✣</text><text x="47" y="91">✣</text></g></>}
     {kind === "sleet" && <><Cloud x={12} y={25} scale={1.05}/><g fill="#eaf6ff">{[28,43,58,73].map((x,i)=><circle key={i} cx={x} cy={78+(i%2)*7} r="4"/>)}</g></>}
