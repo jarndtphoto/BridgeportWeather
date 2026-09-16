@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ComponentProps } from "react";
-import WeatherIcon from "./WeatherIcon";
+import WeatherIcon, { forecastIconKind } from "./WeatherIcon";
 
 type IconKind = ComponentProps<typeof WeatherIcon>["kind"];
 
@@ -11,6 +11,10 @@ type ThreatPayload = {
     headline?: string;
   };
 };
+
+// Use the exact same light-rain icon path as the forecast card example
+// (e.g. "Scattered Rain Showers" at a 30% chance).
+const APPROVED_LIGHT_RAIN_KIND: IconKind = forecastIconKind("Scattered Rain Showers", null, 30);
 
 export default function CurrentConditionsIcon({ kind, className = "" }: { kind: IconKind; className?: string }) {
   const [displayKind, setDisplayKind] = useState<IconKind>(kind);
@@ -31,7 +35,7 @@ export default function CurrentConditionsIcon({ kind, className = "" }: { kind: 
 
         const headline = payload.evolution?.headline?.toLowerCase() ?? "";
         const rainOverBridgeport = payload.evolution?.relevance === "overhead" && headline.includes("rain") && headline.includes("bridgeport");
-        setDisplayKind(rainOverBridgeport ? "light-rain" : kind);
+        setDisplayKind(rainOverBridgeport ? APPROVED_LIGHT_RAIN_KIND : kind);
       } catch {
         if (active) setDisplayKind(kind);
       }
