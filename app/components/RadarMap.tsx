@@ -36,6 +36,7 @@ export default function RadarMap() {
   const radarLayerRef = useRef<ImageOverlay | null>(null);
   const renderTokenRef = useRef(0);
   const frameIndexRef = useRef(0);
+  const framesLengthRef = useRef(0);
   const [frames, setFrames] = useState<RadarFrame[]>([]);
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -48,11 +49,12 @@ export default function RadarMap() {
   const [cloudRevision, setCloudRevision] = useState(0);
 
   useEffect(() => { frameIndexRef.current = frameIndex; }, [frameIndex]);
+  useEffect(() => { framesLengthRef.current = frames.length; }, [frames.length]);
 
   const resetLiveView = useCallback(() => {
     setPlaying(false);
     setMapInteraction(false);
-    setFrameIndex(Math.max(0, frames.length - 1));
+    setFrameIndex(Math.max(0, framesLengthRef.current - 1));
     const map = mapRef.current;
     if (!map) return;
     map.setView(LOCAL_TARGET, DEFAULT_ZOOM, { animate: false });
@@ -60,7 +62,7 @@ export default function RadarMap() {
       map.invalidateSize(false);
       setViewRevision((value) => value + 1);
     });
-  }, [frames.length]);
+  }, []);
 
   const loadFrames = useCallback(async () => {
     try {
@@ -68,6 +70,7 @@ export default function RadarMap() {
       if (!response.ok) throw new Error("Radar metadata unavailable");
       const payload = (await response.json()) as RadarPayload;
       if (!payload.frames.length) throw new Error("No radar frames available");
+      framesLengthRef.current = payload.frames.length;
       setFrames((current) => {
         const currentId = current[frameIndexRef.current]?.id;
         const retainedIndex = payload.frames.findIndex((frame) => frame.id === currentId);
@@ -245,7 +248,7 @@ export default function RadarMap() {
   const setLayer = (layer: LiveLayer) => {
     setPlaying(false);
     setMapInteraction(false);
-    setFrameIndex(Math.max(0, frames.length - 1));
+    setFrameIndex(Math.max(0, framesLengthRef.current - 1));
     setLiveLayer(layer);
     if (layer === "clouds") setCloudRevision((value) => value + 1);
     const map = mapRef.current;
