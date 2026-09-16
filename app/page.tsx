@@ -84,9 +84,21 @@ function forecastNight(p: HourlyForecastPeriod) {
 function consensusIcon(p: HourlyForecastPeriod, s: HrrrPointSample | null) {
   const c = forecastConsensus(p, s);
   const night = forecastNight(p);
-  const cloudy = forecastIconKind("Mostly Cloudy", p.icon, null, night);
-  if (!c.precipitation) return precipitationForecast(p.shortForecast) ? cloudy : forecastIconKind(p.shortForecast, p.icon, p.precipitationChance, night);
+  const text = p.shortForecast.toLowerCase();
+  const wordingSaysRain = text.includes("rain") || text.includes("shower") || text.includes("drizzle");
+  const wordingSaysHeavy = text.includes("heavy rain") || text.includes("heavy shower");
+  const wordingSaysLight = text.includes("scattered") || text.includes("slight chance") || text.includes("chance") || text.includes("isolated") || text.includes("light rain") || text.includes("drizzle");
+
+  // If the NWS wording explicitly says rain/showers, always keep a rain-family icon.
+  // HRRR can increase the intensity, but a dry model sample must not turn a rainy card into a plain cloud.
+  if (wordingSaysRain) {
+    if (wordingSaysHeavy || s?.intensity === "strong") return forecastIconKind("Heavy Rain", p.icon, p.precipitationChance, night);
+    if (s?.intensity === "moderate" && !wordingSaysLight) return forecastIconKind("Rain", p.icon, p.precipitationChance, night);
+    return forecastIconKind(wordingSaysLight ? "Light Rain" : "Rain", p.icon, p.precipitationChance, night);
+  }
+
   if (c.thunder) return forecastIconKind("Thunderstorms", p.icon, p.precipitationChance, night);
+  if (!c.precipitation) return forecastIconKind(p.shortForecast, p.icon, p.precipitationChance, night);
   if (s?.intensity === "strong") return forecastIconKind("Heavy Rain", p.icon, p.precipitationChance, night);
   if (s?.intensity === "moderate") return forecastIconKind("Rain", p.icon, p.precipitationChance, night);
   return forecastIconKind("Light Rain", p.icon, p.precipitationChance, night);
