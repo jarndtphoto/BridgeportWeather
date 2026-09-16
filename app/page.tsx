@@ -121,8 +121,6 @@ export default async function Home() {
 
   if (radarFrames.length) {
     try {
-      // For the near-term cards, use radar motion on its own. Forecast guidance must not
-      // suppress an approaching echo that is already visible in current observations.
       radarEvolution = await assessStormEvolution(
         BRIDGEPORT_LAT,
         BRIDGEPORT_LON,
@@ -167,7 +165,7 @@ export default async function Home() {
     return (
       <article className="forecastHour" key={p.startTime}>
         <span className="forecastHourTime">{forecastTime(p.startTime)}</span>
-        <WeatherIcon className="forecastHourIcon" kind={kind} />
+        {i === 0 ? <CurrentConditionsIcon className="forecastHourIcon" kind={kind} /> : <WeatherIcon className="forecastHourIcon" kind={kind} />}
         <strong>{p.temperature}°</strong>
         <span>{summary}</span>
         <small>{precipLine}</small>
