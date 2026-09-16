@@ -4,6 +4,7 @@ import { getHrrrModelInitUtc, getHrrrPointSample, hrrrForecastMinutesForTime, ty
 import { forecastConsensus } from "../lib/forecastConsensus";
 import { getRadarFrames, getRadarPointReflectivity, type RadarFrame } from "../lib/radar";
 import { assessStormEvolution, type StormEvolution } from "../lib/evolution";
+import { isNightAt, isNightLive } from "../lib/daylight";
 import RadarMap from "./components/RadarMap";
 import ForecastRadar from "./components/ForecastRadar";
 import ThreatBanner from "./components/ThreatBanner";
@@ -76,23 +77,28 @@ function stationRainRate(o: RawObservation | null) {
   return numberValue(o, "rainratein") ?? numberValue(o, "rainrate") ?? numberValue(o, "hourlyrainin");
 }
 
-function consensusIcon(p: HourlyForecastPeriod, s: HrrrPointSample | null) {
-  const c = forecastConsensus(p, s);
-  const cloudy = forecastIconKind("Mostly Cloudy", p.icon);
-  if (!c.precipitation) return precipitationForecast(p.shortForecast) ? cloudy : forecastIconKind(p.shortForecast, p.icon, p.precipitationChance);
-  if (c.thunder) return forecastIconKind("Thunderstorms", p.icon, p.precipitationChance);
-  if (s?.intensity === "strong") return forecastIconKind("Heavy Rain", p.icon, p.precipitationChance);
-  if (s?.intensity === "moderate") return forecastIconKind("Rain", p.icon, p.precipitationChance);
-  return forecastIconKind("Light Rain", p.icon, p.precipitationChance);
+function forecastNight(p: HourlyForecastPeriod) {
+  return isNightAt(new Date(p.startTime), BRIDGEPORT_LAT, BRIDGEPORT_LON);
 }
 
-function observedCurrentIcon(p: HourlyForecastPeriod, dbz: number | null, raining: boolean) {
-  const predicted = forecastIconKind(p.shortForecast, p.icon, p.precipitationChance);
-  const cloudy = forecastIconKind("Mostly Cloudy", p.icon);
+function consensusIcon(p: HourlyForecastPeriod, s: HrrrPointSample | null) {
+  const c = forecastConsensus(p, s);
+  const night = forecastNight(p);
+  const cloudy = forecastIconKind("Mostly Cloudy", p.icon, null, night);
+  if (!c.precipitation) return precipitationForecast(p.shortForecast) ? cloudy : forecastIconKind(p.shortForecast, p.icon, p.precipitationChance, night);
+  if (c.thunder) return forecastIconKind("Thunderstorms", p.icon, p.precipitationChance, night);
+  if (s?.intensity === "strong") return forecastIconKind("Heavy Rain", p.icon, p.precipitationChance, night);
+  if (s?.intensity === "moderate") return forecastIconKind("Rain", p.icon, p.precipitationChance, night);
+  return forecastIconKind("Light Rain", p.icon, p.precipitationChance, night);
+}
+
+function observedCurrentIcon(p: HourlyForecastPeriod, dbz: number | null, raining: boolean, night: boolean) {
+  const predicted = forecastIconKind(p.shortForecast, p.icon, p.precipitationChance, night);
+  const cloudy = forecastIconKind("Mostly Cloudy", p.icon, null, night);
   if ((dbz ?? 0) < 10 && !raining) return precipitationForecast(p.shortForecast) ? cloudy : predicted;
-  if ((dbz ?? 0) >= 45) return forecastIconKind("Heavy Rain", p.icon, p.precipitationChance);
-  if ((dbz ?? 0) >= 30) return forecastIconKind("Rain", p.icon, p.precipitationChance);
-  return forecastIconKind("Light Rain", p.icon, p.precipitationChance);
+  if ((dbz ?? 0) >= 45) return forecastIconKind("Heavy Rain", p.icon, p.precipitationChance, night);
+  if ((dbz ?? 0) >= 30) return forecastIconKind("Rain", p.icon, p.precipitationChance, night);
+  return forecastIconKind("Light Rain", p.icon, p.precipitationChance, night);
 }
 
 export default async function Home() {
@@ -154,12 +160,15 @@ export default async function Home() {
 
   const current = nextSix[0] ?? null;
   const stationRaining = stationRainActive(snapshot?.rawObservation ?? null);
-  const currentIcon = current ? observedCurrentIcon(current, liveRadarDbz, stationRaining) : forecastIconKind("Mostly Cloudy", null);
+  const solarRadiation = snapshot ? numberValue(snapshot.rawObservation, "solarradiation") : null;
+  const liveNight = isNightLive(new Date(), BRIDGEPORT_LAT, BRIDGEPORT_LON, solarRadiation);
+  const currentIcon = current ? observedCurrentIcon(current, liveRadarDbz, stationRaining, liveNight) : forecastIconKind("Mostly Cloudy", null, null, liveNight);
   const radarApproaching = radarEvolution?.relevance === "nearby" && radarEvolution.motion === "approaching";
 
   const renderHour = (p: HourlyForecastPeriod, i: number) => {
+    const night = i === 0 ? liveNight : forecastNight(p);
     const radarNowcastHour = radarApproaching && i > 0 && i <= 2;
-    const kind = i === 0 ? currentIcon : radarNowcastHour ? forecastIconKind("Rain", p.icon, Math.max(50, p.precipitationChance ?? 0)) : consensusIcon(p, samples[i] ?? null);
+    const kind = i === 0 ? currentIcon : radarNowcastHour ? forecastIconKind("Rain", p.icon, Math.max(50, p.precipitationChance ?? 0), night) : consensusIcon(p, samples[i] ?? null);
     const summary = radarNowcastHour ? "Rain approaching" : p.shortForecast;
     const precipLine = radarNowcastHour ? "Live radar indicates approaching precipitation" : p.precipitationChance === null ? "Rain chance —" : `${p.precipitationChance}% rain`;
     return (
