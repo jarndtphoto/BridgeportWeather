@@ -1,10 +1,11 @@
 import "server-only";
 import { getRadarPointReflectivity, type RadarFrame } from "./radar";
+import { getAmbientSnapshot } from "./ambient";
 
 export type StormTrend = "strengthening" | "steady" | "weakening" | "quiet" | "unknown";
 export type StormMotion = "approaching" | "movingAway" | "passingNearby" | "stationaryOrUnclear" | "unknown";
 export type BridgeportRelevance = "overhead" | "nearby" | "quiet" | "unknown";
-export type StormEvolution = { trend:StormTrend; motion:StormMotion; relevance:BridgeportRelevance; headline:string; detail:string; strongestSector:string|null; strongestNearbyDbz:number|null; strongestRadiusMiles:number|null; bridgeportDbz:number|null; previousBridgeportDbz:number|null; sampledRadiusMiles:number; comparisonMinutes:number|null; estimatedArrivalMinutes:number|null; estimatedArrivalWindowMinutes:[number,number]|null; closestApproachMiles:number|null };
+export type StormEvolution = { trend:StormTrend; motion:StormMotion; relevance:BridgeportRelevance; headline:string; detail:string; strongestSector:string|null; strongestNearbyDbz:number|null; strongestRadiusMiles:number|null; bridgeportDbz:number|null; previousBridgeportDbz:number|null; sampledRadiusMiles:number; comparisonMinutes:number|null; estimatedArrivalMinutes:number|null; estimatedArrivalWindowMinutes:[number,number]|null; closestApproachMiles:number|null; windAssist:boolean; surfaceWindMph:number|null; surfaceWindFromDeg:number|null };
 
 const RADII_MILES=[3,6,9,12] as const;
 const INNER_RADIUS_MILES=3, OUTER_RADIUS_MILES=9, SAMPLE_RADIUS_MILES=12;
@@ -25,9 +26,14 @@ function motionFromFieldShift(current:Sample[],previous:Sample[]):StormMotion{co
 function arrivalEstimate(motion:StormMotion,radius:number|null,minutes:number|null){if(radius===null)return{estimatedArrivalMinutes:null,estimatedArrivalWindowMinutes:null as [number,number]|null,closestApproachMiles:null};if(motion==="approaching"&&minutes&&minutes>0){const mph=((OUTER_RADIUS_MILES-INNER_RADIUS_MILES)/minutes)*60;if(mph>=8&&mph<=60){const estimate=Math.round(radius/mph*60),margin=Math.max(5,Math.round(estimate*.6));return{estimatedArrivalMinutes:estimate,estimatedArrivalWindowMinutes:[Math.max(0,estimate-margin),estimate+margin] as [number,number],closestApproachMiles:0}}}if(motion==="passingNearby"||motion==="movingAway")return{estimatedArrivalMinutes:null,estimatedArrivalWindowMinutes:null as [number,number]|null,closestApproachMiles:radius};return{estimatedArrivalMinutes:null,estimatedArrivalWindowMinutes:null as [number,number]|null,closestApproachMiles:null}}
 function directionWords(label:string){return({N:"north",NE:"northeast",E:"east",SE:"southeast",S:"south",SW:"southwest",W:"west",NW:"northwest"} as Record<string,string>)[label]??label}
 function precipitationLabel(radarDbz:number,stationRainIn:number|null){if((stationRainIn??0)>=1)return"Heavy rain";if((stationRainIn??0)>=.1)return"Rain";if(radarDbz>=RAIN_ECHO_DBZ)return"Rain";return"Light precipitation"}
+function angularDifference(a:number,b:number){const d=Math.abs(((a-b+540)%360)-180);return d}
+function windSupportsApproach(strongest:Sample|null,windSpeedMph:number|null,windFromDeg:number|null){if(!strongest||windSpeedMph===null||windFromDeg===null||windSpeedMph<2)return false;const transportBearing=(windFromDeg+180)%360;const fromEchoTowardBridgeport=(strongest.bearing+180)%360;return strongest.radiusMiles<=9&&angularDifference(transportBearing,fromEchoTowardBridgeport)<=60}
+function numberField(observation:Record<string,unknown>,key:string){const value=observation[key];return typeof value==="number"&&Number.isFinite(value)?value:null}
+async function resolveSurfaceWind(speed:number|null,fromDeg:number|null){if(speed!==null&&fromDeg!==null)return{speed,fromDeg};try{const snapshot=await getAmbientSnapshot();const o=snapshot.rawObservation as Record<string,unknown>;return{speed:speed??numberField(o,"windspeedmph")??numberField(o,"windspdmph_avg10m"),fromDeg:fromDeg??numberField(o,"winddir")}}catch{return{speed,fromDeg}}}
 
-export async function assessStormEvolution(lat:number,lon:number,frames:RadarFrame[],bridgeportDbz:number|null,stationRainIn:number|null=null,nearTermForecastDry:boolean|null=null):Promise<StormEvolution>{
- const latest=frames[frames.length-1]??null;if(!latest)return{trend:"unknown",motion:"unknown",relevance:"unknown",headline:"Radar information unavailable",detail:"Recent radar information is unavailable.",strongestSector:null,strongestNearbyDbz:null,strongestRadiusMiles:null,bridgeportDbz,previousBridgeportDbz:null,sampledRadiusMiles:SAMPLE_RADIUS_MILES,comparisonMinutes:null,estimatedArrivalMinutes:null,estimatedArrivalWindowMinutes:null,closestApproachMiles:null};
+export async function assessStormEvolution(lat:number,lon:number,frames:RadarFrame[],bridgeportDbz:number|null,stationRainIn:number|null=null,nearTermForecastDry:boolean|null=null,surfaceWindMph:number|null=null,surfaceWindFromDeg:number|null=null):Promise<StormEvolution>{
+ const wind=await resolveSurfaceWind(surfaceWindMph,surfaceWindFromDeg);
+ const latest=frames[frames.length-1]??null;if(!latest)return{trend:"unknown",motion:"unknown",relevance:"unknown",headline:"Radar information unavailable",detail:"Recent radar information is unavailable.",strongestSector:null,strongestNearbyDbz:null,strongestRadiusMiles:null,bridgeportDbz,previousBridgeportDbz:null,sampledRadiusMiles:SAMPLE_RADIUS_MILES,comparisonMinutes:null,estimatedArrivalMinutes:null,estimatedArrivalWindowMinutes:null,closestApproachMiles:null,windAssist:false,surfaceWindMph:wind.speed,surfaceWindFromDeg:wind.fromDeg};
 
  const samples:Sample[]=await Promise.all(DIRECTIONS.flatMap(direction=>RADII_MILES.map(async radiusMiles=>{const point=destinationPoint(lat,lon,direction.bearing,radiusMiles);const dbz=await getRadarPointReflectivity(point.lat,point.lon,latest.observedAt);return{...direction,...point,radiusMiles,dbz}})));
  const valid=samples.filter((s):s is Sample&{dbz:number}=>s.dbz!==null&&Number.isFinite(s.dbz));
@@ -47,10 +53,13 @@ export async function assessStormEvolution(lat:number,lon:number,frames:RadarFra
  const fieldMotion=prior?motionFromFieldShift(samples,previousSamples):"unknown";
  const sectorMotion=strongest&&prior?motionFromRadialShift(currentInner,currentOuter,previousInner,previousOuter):"unknown";
  const rawMotion:StormMotion=fieldMotion!=="unknown"&&fieldMotion!=="stationaryOrUnclear"?fieldMotion:sectorMotion;
+ const windAssist=windSupportsApproach(strongest,wind.speed,wind.fromDeg);
+ const nearbyEcho=(strongestNearbyDbz??0)>=WEAK_ECHO_DBZ;
+ const windEnhancedMotion:StormMotion=windAssist&&nearbyEcho&&(rawMotion==="unknown"||rawMotion==="stationaryOrUnclear"||rawMotion==="passingNearby")?"approaching":rawMotion;
  const localDry=(bridgeportDbz??0)<RAIN_ECHO_DBZ&&(stationRainIn??0)<=.01;
- // Forecast guidance is only a tie-breaker when live radar cannot resolve motion.
- const forecastSupportsDeparture=localDry&&nearTermForecastDry===true&&(strongestNearbyDbz??0)>=RAIN_ECHO_DBZ&&(rawMotion==="unknown"||rawMotion==="stationaryOrUnclear");
- const motion:StormMotion=forecastSupportsDeparture?"movingAway":rawMotion;
+ // Forecast guidance is only a tie-breaker when radar and live wind cannot resolve motion.
+ const forecastSupportsDeparture=localDry&&nearTermForecastDry===true&&(strongestNearbyDbz??0)>=RAIN_ECHO_DBZ&&!windAssist&&(windEnhancedMotion==="unknown"||windEnhancedMotion==="stationaryOrUnclear");
+ const motion:StormMotion=forecastSupportsDeparture?"movingAway":windEnhancedMotion;
  const comparisonMinutes=prior?Math.round((latest.epochSeconds-prior.epochSeconds)/60):null,estimate=arrivalEstimate(motion,strongest?.radiusMiles??null,comparisonMinutes);
 
  let relevance:BridgeportRelevance="quiet",headline="No significant precipitation near Bridgeport",detail="Radar is mostly quiet around Bridgeport.";
@@ -58,7 +67,7 @@ export async function assessStormEvolution(lat:number,lon:number,frames:RadarFra
  else if((bridgeportDbz??0)>=WEAK_ECHO_DBZ){relevance="overhead";const label=precipitationLabel(bridgeportDbz??0,stationRainIn);headline=`${label} over Bridgeport`;const stationText=(stationRainIn??0)>.01?"The local station is also measuring rain.":"The local station may not detect drizzle or light rain.";detail=`Radar shows precipitation over Bridgeport. ${stationText}`}
  else if((strongestNearbyDbz??0)>=WEAK_ECHO_DBZ&&strongest){relevance="nearby";const where=directionWords(strongest.label);const weak=(strongestNearbyDbz??0)<RAIN_ECHO_DBZ;headline=`${weak?"Light precipitation":"Rain"} ${where} of Bridgeport`;
    if(motion==="movingAway"){headline+=` moving away`;detail=forecastSupportsDeparture?`Radar is clear over Bridgeport and forecast guidance suggests the nearby precipitation is departing.`:`Live radar shows precipitation ${where} of Bridgeport moving away from our area.`}
-   else if(motion==="approaching"){headline+=` moving toward us`;detail=`Live radar shows ${weak?"light precipitation":"rain"} ${where} of Bridgeport moving toward our area.`}
+   else if(motion==="approaching"){headline+=` moving toward us`;detail=windAssist?`Live radar shows ${weak?"light precipitation":"rain"} ${where} of Bridgeport, and the surface wind is carrying low-level moisture toward Bridgeport. Drizzle or light rain may begin before the stronger radar echo arrives.`:`Live radar shows ${weak?"light precipitation":"rain"} ${where} of Bridgeport moving toward our area.`}
    else{detail=`Radar shows ${weak?"light precipitation":"rain"} ${where} of Bridgeport within about ${SAMPLE_RADIUS_MILES} miles.`}}
- return{trend,motion,relevance,headline,detail,strongestSector:strongest?.label??null,strongestNearbyDbz,strongestRadiusMiles:strongest?.radiusMiles??null,bridgeportDbz,previousBridgeportDbz,sampledRadiusMiles:SAMPLE_RADIUS_MILES,comparisonMinutes,estimatedArrivalMinutes:estimate.estimatedArrivalMinutes,estimatedArrivalWindowMinutes:estimate.estimatedArrivalWindowMinutes,closestApproachMiles:estimate.closestApproachMiles};
+ return{trend,motion,relevance,headline,detail,strongestSector:strongest?.label??null,strongestNearbyDbz,strongestRadiusMiles:strongest?.radiusMiles??null,bridgeportDbz,previousBridgeportDbz,sampledRadiusMiles:SAMPLE_RADIUS_MILES,comparisonMinutes,estimatedArrivalMinutes:estimate.estimatedArrivalMinutes,estimatedArrivalWindowMinutes:estimate.estimatedArrivalWindowMinutes,closestApproachMiles:estimate.closestApproachMiles,windAssist,surfaceWindMph:wind.speed,surfaceWindFromDeg:wind.fromDeg};
 }
