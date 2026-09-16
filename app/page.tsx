@@ -132,8 +132,6 @@ export default async function Home() {
   const current = nextSix[0] ?? null;
   const stationRaining = stationRainActive(snapshot?.rawObservation ?? null);
   const currentIcon = current ? observedCurrentIcon(current, liveRadarDbz, stationRaining) : forecastIconKind("Mostly Cloudy", null);
-  const homeHours = nextSix.slice(0, 4);
-  const homeLater = later.slice(0, 2);
 
   const renderHour = (p: HourlyForecastPeriod, i: number) => {
     const kind = i === 0 ? currentIcon : consensusIcon(p, samples[i] ?? null);
@@ -184,33 +182,6 @@ export default async function Home() {
             ))}
           </div>
         </section>
-
-        {homeHours.length > 0 && (
-          <section className="homeForecastPreview" aria-labelledby="home-hourly-title">
-            <div className="sectionTitle">
-              <h2 id="home-hourly-title">Next few hours</h2>
-              <span>NWS + HRRR</span>
-            </div>
-            <div className="forecastHours homeForecastHours">{homeHours.map(renderHour)}</div>
-          </section>
-        )}
-
-        {homeLater.length > 0 && (
-          <section className="homeOutlook" aria-labelledby="home-outlook-title">
-            <div className="sectionTitle forecastOutlookTitle">
-              <h2 id="home-outlook-title">Later outlook</h2>
-              <span>NWS</span>
-            </div>
-            <div className="forecastOutlook compactOutlook">
-              {homeLater.map((p) => (
-                <article key={`${p.number}-${p.startTime}`}>
-                  <div><strong>{p.name}</strong><span>{p.shortForecast}</span></div>
-                  <b>{p.temperature}°</b>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
       </section>
 
       <section className="tabPanel radarPanel" aria-labelledby="radar-title">
