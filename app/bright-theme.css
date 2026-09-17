@@ -3,6 +3,7 @@ body{background:linear-gradient(180deg,#1d3a56 0,#173149 38%,#102235 100%);color
 .eyebrow,.kicker{color:#b9d7ee}
 .live{color:#c7d9e8}.live.connected{color:#a9efc0}.live.connected i{background:#4fdb82;box-shadow:0 0 0 4px rgba(79,219,130,.18)}
 .threatZone,.emptyState{border-color:#486681;background:#25445f}.threatZone p,.emptyState p{color:#d2e2ef}
+.threatZone.weatherState-rain.threatLevel-none{border-color:#6d8c3f;background:#334c2a}
 .threatZone.threatLevel-monitor{border-color:#6d8c3f;background:#334c2a}.threatZone.threatLevel-elevated{border-color:#a17626;background:#5a431f}.threatZone.threatLevel-severe{border-color:#a63a4d;background:#5a2630}
 .threatFactorList li{background:rgba(255,255,255,.07)}.threatFactorList li span{color:#d2e2ef}
 .sectionTitle span{color:#abc5d9}.radarFreshness.ready{color:#98efb6}.radarFreshness.loading{color:#ffd275}.radarFreshness.error{color:#ff9bac}
