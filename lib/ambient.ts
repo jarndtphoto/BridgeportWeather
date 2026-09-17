@@ -1,6 +1,7 @@
 import "server-only";
 
 const AMBIENT_DEVICES_URL = "https://rt.ambientweather.net/v1/devices";
+const WIND_DIRECTION_OFFSET_DEGREES = 180;
 
 type JsonScalar = string | number | boolean | null;
 export type RawObservation = Record<string, JsonScalar>;
@@ -38,6 +39,12 @@ function sanitizeObservation(value: unknown): RawObservation {
     const isScalar = fieldValue === null || ["string", "number", "boolean"].includes(typeof fieldValue);
     return !isSensitive && isScalar;
   })) as RawObservation;
+}
+
+function correctWindDirection(observation: RawObservation) {
+  const value = observation.winddir;
+  if (typeof value !== "number" || !Number.isFinite(value)) return;
+  observation.winddir = (value + WIND_DIRECTION_OFFSET_DEGREES) % 360;
 }
 
 function observationDate(observation: RawObservation) {
@@ -80,6 +87,7 @@ export async function getAmbientSnapshot(): Promise<AmbientSnapshot> {
   if (!device) throw new AmbientWeatherError("no_station", "No station with a latest observation was found.");
 
   const rawObservation = sanitizeObservation(device.lastData);
+  correctWindDirection(rawObservation);
   return {
     station: {
       name: safeText(device.info?.name, "Bridgeport weather station"),
