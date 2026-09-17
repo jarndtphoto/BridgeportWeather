@@ -91,14 +91,10 @@ function consensusIcon(p: HourlyForecastPeriod, s: HrrrPointSample | null) {
   const pop = p.precipitationChance ?? 0;
   const hrrrDry = s?.precipitation === false || s?.intensity === "none";
 
-  // A sub-30% NWS rain chance should not force a rain icon when the point HRRR forecast is dry over Bridgeport.
-  // Keep the probability text on the card, but show the underlying cloudy sky state instead.
   if (wordingSaysRain && pop < 30 && hrrrDry) {
     return forecastIconKind("Mostly Cloudy", p.icon, null, night);
   }
 
-  // If the NWS wording explicitly says rain/showers at 30%+, keep a rain-family icon.
-  // HRRR can increase the intensity, but a dry model sample must not turn a meaningful rainy card into a plain cloud.
   if (wordingSaysRain) {
     if (wordingSaysHeavy || s?.intensity === "strong") return forecastIconKind("Heavy Rain", p.icon, p.precipitationChance, night);
     if (s?.intensity === "moderate" && !wordingSaysLight) return forecastIconKind("Rain", p.icon, p.precipitationChance, night);
@@ -168,17 +164,16 @@ export default async function Home() {
       ];
 
   const now = Date.now();
-  const nextSix = forecast?.hourly.filter((p) => Date.parse(p.startTime) + 3600000 > now).slice(0, 6) ?? [];
+  const current = forecast?.hourly.find((p) => Date.parse(p.startTime) <= now && Date.parse(p.startTime) + 3600000 > now) ?? null;
+  const nextSix = forecast?.hourly.filter((p) => Date.parse(p.startTime) > now).slice(0, 6) ?? [];
   const later = forecast?.daily.slice(0, 4) ?? [];
   const samples = await Promise.all(
-    nextSix.map(async (p, i) => {
-      if (i === 0) return null;
+    nextSix.map(async (p) => {
       const m = hrrrForecastMinutesForTime(p.startTime, hrrrModelInitUtc);
       return m === null ? null : getHrrrPointSample(BRIDGEPORT_LAT, BRIDGEPORT_LON, m);
     }),
   );
 
-  const current = nextSix[0] ?? null;
   const stationRaining = stationRainActive(snapshot?.rawObservation ?? null);
   const solarRadiation = snapshot ? numberValue(snapshot.rawObservation, "solarradiation") : null;
   const liveNight = isNightLive(new Date(), BRIDGEPORT_LAT, BRIDGEPORT_LON, solarRadiation);
@@ -186,15 +181,15 @@ export default async function Home() {
   const radarApproaching = radarEvolution?.relevance === "nearby" && radarEvolution.motion === "approaching";
 
   const renderHour = (p: HourlyForecastPeriod, i: number) => {
-    const night = i === 0 ? liveNight : forecastNight(p);
-    const radarNowcastHour = radarApproaching && i > 0 && i <= 2;
-    const kind = i === 0 ? currentIcon : radarNowcastHour ? forecastIconKind("Rain", p.icon, Math.max(50, p.precipitationChance ?? 0), night) : consensusIcon(p, samples[i] ?? null);
+    const night = forecastNight(p);
+    const radarNowcastHour = radarApproaching && i <= 1;
+    const kind = radarNowcastHour ? forecastIconKind("Rain", p.icon, Math.max(50, p.precipitationChance ?? 0), night) : consensusIcon(p, samples[i] ?? null);
     const summary = radarNowcastHour ? "Rain approaching" : p.shortForecast;
     const precipLine = radarNowcastHour ? "Live radar indicates approaching precipitation" : p.precipitationChance === null ? "Rain chance —" : `${p.precipitationChance}% rain`;
     return (
       <article className="forecastHour" key={p.startTime}>
         <span className="forecastHourTime">{forecastTime(p.startTime)}</span>
-        {i === 0 ? <CurrentConditionsIcon className="forecastHourIcon" kind={kind} /> : <WeatherIcon className="forecastHourIcon" kind={kind} />}
+        <WeatherIcon className="forecastHourIcon" kind={kind} />
         <strong>{p.temperature}°</strong>
         <span>{summary}</span>
         <small>{precipLine}</small>
