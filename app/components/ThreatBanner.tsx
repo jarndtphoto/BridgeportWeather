@@ -35,6 +35,17 @@ function estimatedMotionMph(evolution: StormEvolution) {
   return Math.round(mph);
 }
 
+function localPrecipitationLabel(localDbz: number | null, rainRate: number | null) {
+  const rate = rainRate ?? 0;
+  // Do not call precipitation moderate/heavy from a point-radar value alone. The rendered
+  // radar can be light green while the point sample reports a much stronger palette value.
+  // Require the local gauge to support the stronger wording too.
+  if ((localDbz ?? 0) >= 45 && rate >= 1) return "Heavy precipitation";
+  if ((localDbz ?? 0) >= 30 && rate >= 0.3) return "Moderate precipitation";
+  if (rate > 0.01) return "Light rain";
+  return "Light precipitation";
+}
+
 function userFriendlyEvolution(evolution: StormEvolution, inputs: ThreatInputs | null, forecast: ThreatForecast | null) {
   const localDbz = inputs?.radarDbz ?? evolution.bridgeportDbz ?? null;
   const rainRate = inputs?.hourlyRainIn ?? null;
@@ -45,8 +56,8 @@ function userFriendlyEvolution(evolution: StormEvolution, inputs: ThreatInputs |
   const moreRainSupported = forecast?.nearTermDry === false;
 
   if (evolution.relevance === "overhead") {
-    const intensity = (localDbz ?? 0) >= 45 ? "Heavy precipitation" : (localDbz ?? 0) >= 30 ? "Moderate precipitation" : "Rain";
-    let detail = `Radar shows ${intensity.toLowerCase()} over Bridgeport.`;
+    const intensity = localPrecipitationLabel(localDbz, rainRate);
+    let detail = `Radar and local observations show ${intensity.toLowerCase()} over Bridgeport.`;
     if (rainRate !== null && rainRate > 0) detail += ` The local station is measuring ${rainRate.toFixed(2)} in/hr.`;
     if (windFrom && windSpeed !== null) detail += ` Surface wind is from the ${windFrom} around ${windSpeed} mph.`;
     if (gust !== null && gust >= 20) detail += ` Gusts are near ${Math.round(gust)} mph.`;
