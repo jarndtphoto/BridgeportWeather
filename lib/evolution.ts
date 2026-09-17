@@ -62,7 +62,7 @@ export async function assessStormEvolution(lat:number,lon:number,frames:RadarFra
  const motion:StormMotion=forecastSupportsDeparture?"movingAway":windEnhancedMotion;
  const comparisonMinutes=prior?Math.round((latest.epochSeconds-prior.epochSeconds)/60):null,estimate=arrivalEstimate(motion,strongest?.radiusMiles??null,comparisonMinutes);
 
- let relevance:BridgeportRelevance="quiet",headline="No significant precipitation near Bridgeport",detail="Radar is mostly quiet around Bridgeport.";
+ let relevance:BridgeportRelevance="quiet",headline="No significant precipitation near Bridgeport",detail="Radar is mostly quiet.";
  if(bridgeportDbz===null&&strongestNearbyDbz===null){relevance="unknown";headline="Radar information unavailable";detail="Radar information is unavailable right now."}
  else if((bridgeportDbz??0)>=WEAK_ECHO_DBZ){relevance="overhead";const label=precipitationLabel(bridgeportDbz??0,stationRainIn);headline=`${label} over Bridgeport`;const stationText=(stationRainIn??0)>.01?"The local station is also measuring rain.":"The local station may not detect drizzle or light rain.";detail=`Radar shows precipitation over Bridgeport. ${stationText}`}
  else if((strongestNearbyDbz??0)>=WEAK_ECHO_DBZ&&strongest){relevance="nearby";const where=directionWords(strongest.label);const weak=(strongestNearbyDbz??0)<RAIN_ECHO_DBZ;headline=`${weak?"Light precipitation":"Rain"} ${where} of Bridgeport`;
