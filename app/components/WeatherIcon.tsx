@@ -78,7 +78,7 @@ function Snowflakes({ count }: { count: 2 | 5 }) {
 
 export default function WeatherIcon({ kind, className = "" }: { kind: IconKind; className?: string }) {
   const night = kind.includes("night");
-  const cloudDark = ["heavy-rain","thunderstorms","severe-storms","overcast"].includes(kind);
+  const cloudDark = ["thunderstorms","severe-storms","overcast"].includes(kind);
   const nightRain = ["light-rain-night","rain-night","heavy-rain-night"].includes(kind);
   const nightSnow = ["light-snow-night","heavy-snow-night"].includes(kind);
   const nightCloud = ["cloudy-night","overcast-night"].includes(kind);
