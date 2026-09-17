@@ -5,7 +5,8 @@ import type { ThreatAssessment, ThreatLevel } from "../../lib/threat";
 import type { StormEvolution } from "../../lib/evolution";
 
 type ThreatInputs = { hourlyRainIn?: number | null; windGustMph?: number | null; radarDbz?: number | null };
-type ThreatResponse = { assessment: ThreatAssessment; evolution?: StormEvolution; inputs?: ThreatInputs };
+type ThreatForecast = { nearTermDry?: boolean | null };
+type ThreatResponse = { assessment: ThreatAssessment; evolution?: StormEvolution; inputs?: ThreatInputs; forecast?: ThreatForecast };
 
 const LEVEL_COPY: Record<ThreatLevel, string> = {
   none: "No elevated threat",
@@ -34,13 +35,14 @@ function estimatedMotionMph(evolution: StormEvolution) {
   return Math.round(mph);
 }
 
-function userFriendlyEvolution(evolution: StormEvolution, inputs: ThreatInputs | null) {
+function userFriendlyEvolution(evolution: StormEvolution, inputs: ThreatInputs | null, forecast: ThreatForecast | null) {
   const localDbz = inputs?.radarDbz ?? evolution.bridgeportDbz ?? null;
   const rainRate = inputs?.hourlyRainIn ?? null;
   const gust = inputs?.windGustMph ?? null;
   const windFrom = windDirectionWords(evolution.surfaceWindFromDeg);
   const windSpeed = evolution.surfaceWindMph === null ? null : Math.round(evolution.surfaceWindMph);
   const motionSpeed = estimatedMotionMph(evolution);
+  const moreRainSupported = forecast?.nearTermDry === false;
 
   if (evolution.relevance === "overhead") {
     const intensity = (localDbz ?? 0) >= 45 ? "Heavy precipitation" : (localDbz ?? 0) >= 30 ? "Moderate precipitation" : "Rain";
@@ -49,8 +51,22 @@ function userFriendlyEvolution(evolution: StormEvolution, inputs: ThreatInputs |
     if (windFrom && windSpeed !== null) detail += ` Surface wind is from the ${windFrom} around ${windSpeed} mph.`;
     if (gust !== null && gust >= 20) detail += ` Gusts are near ${Math.round(gust)} mph.`;
     if (evolution.motion === "approaching") detail += ` The precipitation is still moving into the area${motionSpeed ? ` at about ${motionSpeed} mph` : ""}.`;
-    else if (evolution.motion === "movingAway") detail += " The precipitation is beginning to move away from the area.";
+    else if (evolution.motion === "movingAway") {
+      detail += moreRainSupported
+        ? " This particular radar band is shifting away, but near-term forecast guidance still supports additional precipitation around Bridgeport, so rain may continue or redevelop."
+        : " The current radar band is beginning to shift away from the area.";
+    }
     return { headline: `${intensity} over Bridgeport`, detail };
+  }
+
+  if (evolution.relevance === "nearby" && evolution.motion === "movingAway" && moreRainSupported) {
+    const where = directionWords(evolution.strongestSector);
+    const precip = (evolution.strongestNearbyDbz ?? 0) >= 10 ? "Rain" : "Light precipitation";
+    const headline = where ? `${precip} ${where} of Bridgeport` : `${precip} near Bridgeport`;
+    let detail = "The nearest radar echo is shifting away from Bridgeport, but that does not mean the rain event is ending.";
+    detail += " Near-term forecast guidance still supports additional precipitation around the area, so more rain may continue or redevelop over the next few hours.";
+    if (windFrom && windSpeed !== null) detail += ` Surface wind is from the ${windFrom} around ${windSpeed} mph.`;
+    return { headline, detail };
   }
 
   if (evolution.relevance !== "nearby" || evolution.motion !== "approaching") {
@@ -74,6 +90,7 @@ export default function ThreatBanner() {
   const [assessment, setAssessment] = useState<ThreatAssessment | null>(null);
   const [evolution, setEvolution] = useState<StormEvolution | null>(null);
   const [inputs, setInputs] = useState<ThreatInputs | null>(null);
+  const [forecast, setForecast] = useState<ThreatForecast | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
@@ -87,6 +104,7 @@ export default function ThreatBanner() {
         setAssessment(payload.assessment);
         setEvolution(payload.evolution ?? null);
         setInputs(payload.inputs ?? null);
+        setForecast(payload.forecast ?? null);
         setStatus("ready");
       } catch {
         if (active) setStatus("error");
@@ -101,7 +119,7 @@ export default function ThreatBanner() {
   if (status === "error" || !assessment) return <div className="threatZone"><strong>Threat assessment unavailable</strong><p>Live weather data couldn&rsquo;t be reached. The app will retry automatically.</p></div>;
 
   const authoritativeFactors = assessment.factors.filter((factor) => factor.level !== "none" && ["officialWarning", "tornado", "probSevere"].includes(factor.category));
-  const evolutionCopy = evolution ? userFriendlyEvolution(evolution, inputs) : null;
+  const evolutionCopy = evolution ? userFriendlyEvolution(evolution, inputs, forecast) : null;
   const rainActive = Boolean(evolutionCopy && /\brain\b|\bprecipitation\b|\bdrizzle\b|\bshowers?\b/i.test(`${evolutionCopy.headline} ${evolutionCopy.detail}`));
   const weatherStateClass = rainActive ? " weatherState-rain" : "";
 
