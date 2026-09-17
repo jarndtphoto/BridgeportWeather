@@ -126,9 +126,13 @@ export default function ThreatBanner() {
     (factor) => factor.level !== "none" && ["officialWarning", "tornado", "probSevere"].includes(factor.category),
   );
   const evolutionCopy = evolution ? userFriendlyEvolution(evolution) : null;
+  const rainActive = Boolean(
+    evolutionCopy && /\brain\b|\bprecipitation\b|\bdrizzle\b|\bshowers?\b/i.test(`${evolutionCopy.headline} ${evolutionCopy.detail}`),
+  );
+  const weatherStateClass = rainActive ? " weatherState-rain" : "";
 
   return (
-    <div className={`threatZone threatLevel-${assessment.overallLevel}`}>
+    <div className={`threatZone threatLevel-${assessment.overallLevel}${weatherStateClass}`}>
       <strong>{LEVEL_COPY[assessment.overallLevel]}</strong>
       {authoritativeFactors.length > 0 && (
         <ul className="threatFactorList">
