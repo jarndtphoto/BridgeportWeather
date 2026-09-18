@@ -223,7 +223,7 @@ export default function RadarMap() {
     const token = ++renderTokenRef.current;
     removeOverlay(pendingOverlayRef.current);
 
-    const next = L.imageOverlay(url, bounds, { opacity: 0, pane: "weather", interactive: false }).addTo(map);
+    const next = L.imageOverlay(url, bounds, { opacity: 0, pane: "weather", interactive: false });
     pendingOverlayRef.current = next;
     let settled = false;
 
@@ -250,8 +250,12 @@ export default function RadarMap() {
       if (pendingOverlayRef.current === next) pendingOverlayRef.current = null;
     };
 
+    // Attach handlers before adding the overlay. On iOS, a fast/cached image can
+    // finish loading immediately after addTo(); attaching afterward can miss the
+    // load event and leave the overlay permanently transparent.
     next.once("load", promote);
     next.once("error", discard);
+    next.addTo(map);
 
     return () => {
       next.off("load", promote);
