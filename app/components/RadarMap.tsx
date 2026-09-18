@@ -223,7 +223,11 @@ export default function RadarMap() {
     const token = ++renderTokenRef.current;
     removeOverlay(pendingOverlayRef.current);
 
-    const next = L.imageOverlay(url, bounds, { opacity: 0, pane: "weather", interactive: false });
+    // Render the requested radar image at its real opacity immediately.
+    // The previous implementation started every image at opacity 0 and waited
+    // for a Leaflet load event to reveal it. If that event was missed or
+    // interrupted on iOS, a valid radar image could remain invisible forever.
+    const next = L.imageOverlay(url, bounds, { opacity, pane: "weather", interactive: false });
     pendingOverlayRef.current = next;
     let settled = false;
 
@@ -236,7 +240,6 @@ export default function RadarMap() {
         return;
       }
 
-      next.setOpacity(opacity);
       const previous = currentOverlayRef.current;
       currentOverlayRef.current = next;
       pendingOverlayRef.current = null;
