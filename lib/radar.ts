@@ -11,20 +11,35 @@ export const RADAR_SOURCE = {
 
 export type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
 
+function parseRadarTimes(value: string) {
+  return [...value.matchAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g)]
+    .map((item) => item[0])
+    .filter((time, index, list) => list.indexOf(time) === index)
+    .map((observedAt) => ({ observedAt, epochSeconds: Math.floor(Date.parse(observedAt) / 1000) }))
+    .filter((frame) => Number.isFinite(frame.epochSeconds))
+    .sort((a, b) => a.epochSeconds - b.epochSeconds);
+}
+
 function radarTimeCandidates(xml: string) {
-  const blocks = [
-    ...xml.matchAll(/<(?:Dimension|Extent)\b[^>]*name=["']time["'][^>]*>([\s\S]*?)<\/(?:Dimension|Extent)>/gi),
-  ];
-  return blocks
-    .map((match) => {
-      const timestamps = [...match[1].matchAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g)]
-        .map((item) => item[0])
-        .filter((value, index, list) => list.indexOf(value) === index)
-        .map((observedAt) => ({ observedAt, epochSeconds: Math.floor(Date.parse(observedAt) / 1000) }))
-        .filter((frame) => Number.isFinite(frame.epochSeconds))
-        .sort((a, b) => a.epochSeconds - b.epochSeconds);
-      return timestamps;
-    })
+  // Read the time dimension belonging to the actual conus_bref_qcd layer first.
+  // NOAA's capabilities response can contain time dimensions for other layers;
+  // mixing those timestamps with this layer produces blank GetMap images.
+  const layerName = new RegExp(`<Name>\\s*${RADAR_LAYER}\\s*</Name>`, "i");
+  const nameMatch = layerName.exec(xml);
+  if (nameMatch) {
+    const afterName = xml.slice(nameMatch.index + nameMatch[0].length);
+    const nextLayer = afterName.search(/<Layer\b/i);
+    const layerChunk = nextLayer >= 0 ? afterName.slice(0, nextLayer) : afterName;
+    const timeMatch = layerChunk.match(/<(?:Dimension|Extent)\b[^>]*name=["']time["'][^>]*>([\s\S]*?)<\/(?:Dimension|Extent)>/i);
+    if (timeMatch) {
+      const frames = parseRadarTimes(timeMatch[1]);
+      if (frames.length) return [frames];
+    }
+  }
+
+  // Fallback for unexpected capabilities formatting.
+  return [...xml.matchAll(/<(?:Dimension|Extent)\b[^>]*name=["']time["'][^>]*>([\s\S]*?)<\/(?:Dimension|Extent)>/gi)]
+    .map((match) => parseRadarTimes(match[1]))
     .filter((frames) => frames.length > 0);
 }
 
