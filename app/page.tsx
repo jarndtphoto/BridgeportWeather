@@ -2,8 +2,6 @@ import { getAmbientSnapshot, type AmbientSnapshot, type RawObservation } from ".
 import { getLocalForecast, type LocalForecast, type HourlyForecastPeriod } from "../lib/forecast";
 import { getHrrrModelInitUtc, getHrrrPointSample, hrrrForecastMinutesForTime, type HrrrPointSample } from "../lib/hrrr";
 import { forecastConsensus } from "../lib/forecastConsensus";
-import { getRadarFrames, getRadarPointReflectivity, type RadarFrame } from "../lib/radar";
-import { assessStormEvolution, type StormEvolution } from "../lib/evolution";
 import { isNightAt, isNightLive } from "../lib/daylight";
 import RadarMap from "./components/RadarMap";
 import ForecastRadar from "./components/ForecastRadar";
@@ -121,39 +119,15 @@ export default async function Home() {
   let snapshot: AmbientSnapshot | null = null;
   let forecast: LocalForecast | null = null;
   let hrrrModelInitUtc: string | null = null;
-  let liveRadarDbz: number | null = null;
-  let radarFrames: RadarFrame[] = [];
-  let radarEvolution: StormEvolution | null = null;
-
-  const [a, f, h, r] = await Promise.allSettled([
+  const [a, f, h] = await Promise.allSettled([
     getAmbientSnapshot(),
     getLocalForecast(BRIDGEPORT_LAT, BRIDGEPORT_LON),
     getHrrrModelInitUtc(),
-    getRadarFrames(),
   ]);
 
   if (a.status === "fulfilled") snapshot = a.value;
   if (f.status === "fulfilled") forecast = f.value;
   if (h.status === "fulfilled") hrrrModelInitUtc = h.value;
-  if (r.status === "fulfilled" && r.value.length) {
-    radarFrames = r.value;
-    const latest = r.value[r.value.length - 1];
-    liveRadarDbz = await getRadarPointReflectivity(BRIDGEPORT_LAT, BRIDGEPORT_LON, latest.observedAt);
-  }
-
-  if (radarFrames.length) {
-    try {
-      radarEvolution = await assessStormEvolution(
-        BRIDGEPORT_LAT,
-        BRIDGEPORT_LON,
-        radarFrames,
-        null,
-        stationRainRate(snapshot?.rawObservation ?? null),
-        null,
-      );
-    } catch {}
-  }
-
   const metrics = snapshot
     ? observationMetrics(snapshot.rawObservation)
     : [
@@ -177,15 +151,13 @@ export default async function Home() {
   const stationRaining = stationRainActive(snapshot?.rawObservation ?? null);
   const solarRadiation = snapshot ? numberValue(snapshot.rawObservation, "solarradiation") : null;
   const liveNight = isNightLive(new Date(), BRIDGEPORT_LAT, BRIDGEPORT_LON, solarRadiation);
-  const currentIcon = current ? observedCurrentIcon(current, liveRadarDbz, stationRaining, liveNight) : forecastIconKind("Mostly Cloudy", null, null, liveNight);
-  const radarApproaching = radarEvolution?.relevance === "nearby" && radarEvolution.motion === "approaching";
+  const currentIcon = current ? observedCurrentIcon(current, null, stationRaining, liveNight) : forecastIconKind("Mostly Cloudy", null, null, liveNight);
 
   const renderHour = (p: HourlyForecastPeriod, i: number) => {
     const night = forecastNight(p);
-    const radarNowcastHour = radarApproaching && i <= 1;
-    const kind = radarNowcastHour ? forecastIconKind("Rain", p.icon, Math.max(50, p.precipitationChance ?? 0), night) : consensusIcon(p, samples[i] ?? null);
-    const summary = radarNowcastHour ? "Rain approaching" : p.shortForecast;
-    const precipLine = radarNowcastHour ? "Live radar indicates approaching precipitation" : p.precipitationChance === null ? "Rain chance —" : `${p.precipitationChance}% rain`;
+    const kind = consensusIcon(p, samples[i] ?? null);
+    const summary = p.shortForecast;
+    const precipLine = p.precipitationChance === null ? "Rain chance —" : `${p.precipitationChance}% rain`;
     return (
       <article className="forecastHour" key={p.startTime}>
         <span className="forecastHourTime">{forecastTime(p.startTime)}</span>
