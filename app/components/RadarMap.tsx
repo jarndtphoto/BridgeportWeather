@@ -214,8 +214,13 @@ export default function RadarMap() {
         bbox: `${sw.x},${sw.y},${ne.x},${ne.y}`,
         width: String(width),
         height: String(height),
-        time: frame.observedAt,
       });
+      // For the newest frame, let NOAA render its current layer directly instead
+      // of pinning the image to a capabilities timestamp that can briefly lag the
+      // image service. Historical frames still request their exact observation.
+      const newestFrame = frameIndex === frames.length - 1;
+      if (!newestFrame) params.set("time", frame.observedAt);
+      else params.set("latest", String(Date.now()));
       url = `/api/radar/image?${params.toString()}`;
       opacity = 0.58;
     }
