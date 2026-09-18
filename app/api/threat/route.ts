@@ -16,7 +16,7 @@ function toMercator(lat:number,lon:number){const x=lon*MERCATOR_RADIUS/180;const
 async function visibleRadarEchoAtBridgeport(isoTime:string):Promise<boolean|null>{
   const center=toMercator(BRIDGEPORT_LAT,BRIDGEPORT_LON),halfSizeMeters=1200,size=9;
   const url=new URL(radarWmsUrl());
-  url.search=new URLSearchParams({service:"WMS",version:"1.1.1",request:"GetMap",layers:RADAR_LAYER,styles:"radar_reflectivity",format:"image/png",transparent:"true",srs:"EPSG:3857",bbox:[center.x-halfSizeMeters,center.y-halfSizeMeters,center.x+halfSizeMeters,center.y+halfSizeMeters].join(","),width:String(size),height:String(size),time:isoTime}).toString();
+  url.search=new URLSearchParams({service:"WMS",version:"1.1.1",request:"GetMap",layers:RADAR_LAYER,styles:"",format:"image/png",transparent:"true",srs:"EPSG:3857",bbox:[center.x-halfSizeMeters,center.y-halfSizeMeters,center.x+halfSizeMeters,center.y+halfSizeMeters].join(","),width:String(size),height:String(size),time:isoTime}).toString();
   try{
     const response=await fetch(url,{next:{revalidate:60}});if(!response.ok)return null;
     const png=PNG.sync.read(Buffer.from(await response.arrayBuffer()));
