@@ -20,15 +20,17 @@ export async function GET(request: Request) {
   const height = validSize(params.get("height") ?? params.get("HEIGHT"));
   const rawTime = params.get("time") ?? params.get("TIME");
   const time = rawTime && Number.isFinite(Date.parse(rawTime)) ? new Date(rawTime).toISOString() : null;
-  if (!bbox || !width || !height || !time) return Response.json({ error: "Invalid radar image request." }, { status: 400 });
+  if (!bbox || !width || !height || (rawTime && !time)) return Response.json({ error: "Invalid radar image request." }, { status: 400 });
 
+  const wmsParams: Record<string, string> = { service: "WMS", version: "1.1.1", request: "GetMap", layers: RADAR_LAYER, styles: "", format: "image/png", transparent: "true", srs: "EPSG:3857", bbox, width, height };
+  if (time) wmsParams.time = time;
   const url = new URL(radarWmsUrl());
-  url.search = new URLSearchParams({ service: "WMS", version: "1.1.1", request: "GetMap", layers: RADAR_LAYER, styles: "", format: "image/png", transparent: "true", srs: "EPSG:3857", bbox, width, height, time }).toString();
+  url.search = new URLSearchParams(wmsParams).toString();
   try {
-    const response = await fetch(url, { next: { revalidate: 30 } });
+    const response = await fetch(url, { cache: time ? undefined : "no-store", next: time ? { revalidate: 30 } : undefined });
     const contentType = response.headers.get("content-type") ?? "";
     if (!response.ok || !contentType.toLowerCase().includes("image/")) throw new Error("NOAA radar image unavailable");
-    return new Response(response.body, { headers: { "Content-Type": contentType || "image/png", "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" } });
+    return new Response(response.body, { headers: { "Content-Type": contentType || "image/png", "Cache-Control": time ? "public, s-maxage=30, stale-while-revalidate=60" : "no-store" } });
   } catch {
     return Response.json({ error: "Radar image temporarily unavailable." }, { status: 502 });
   }
