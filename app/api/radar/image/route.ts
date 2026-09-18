@@ -1,4 +1,5 @@
 import { RADAR_LAYER, radarWmsUrl } from "../../../../lib/radar";
+import { PNG } from "pngjs";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,38 @@ export async function GET(request: Request) {
     const response = await fetch(url, { cache: time ? undefined : "no-store", next: time ? { revalidate: 30 } : undefined });
     const contentType = response.headers.get("content-type") ?? "";
     if (!response.ok || !contentType.toLowerCase().includes("image/")) throw new Error("NOAA radar image unavailable");
-    return new Response(response.body, { headers: { "Content-Type": contentType || "image/png", "Cache-Control": time ? "public, s-maxage=30, stale-while-revalidate=60" : "no-store" } });
+
+    const bytes = Buffer.from(await response.arrayBuffer());
+    let visiblePixels: number | null = null;
+    let totalPixels: number | null = null;
+    try {
+      const png = PNG.sync.read(bytes);
+      totalPixels = png.width * png.height;
+      let visible = 0;
+      for (let i = 3; i < png.data.length; i += 4) if (png.data[i] > 8) visible++;
+      visiblePixels = visible;
+    } catch {}
+
+    console.info("RADAR_IMAGE_DIAGNOSTIC", {
+      requestedTime: time,
+      bbox,
+      width,
+      height,
+      upstreamUrl: url.toString(),
+      contentType,
+      visiblePixels,
+      totalPixels,
+    });
+
+    return new Response(bytes, {
+      headers: {
+        "Content-Type": contentType || "image/png",
+        "Cache-Control": time ? "public, s-maxage=30, stale-while-revalidate=60" : "no-store",
+        "X-Radar-Time": time ?? "latest",
+        ...(visiblePixels !== null ? { "X-Radar-Visible-Pixels": String(visiblePixels) } : {}),
+        ...(totalPixels !== null ? { "X-Radar-Total-Pixels": String(totalPixels) } : {}),
+      },
+    });
   } catch {
     return Response.json({ error: "Radar image temporarily unavailable." }, { status: 502 });
   }
