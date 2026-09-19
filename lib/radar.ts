@@ -1,4 +1,8 @@
+import { PNG } from "pngjs";
+
 const NOAA_RADAR_WMS = "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows";
+const IEM_N0Q_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q-t.cgi";
+const IEM_N0Q_LAYER = "nexrad-n0q-wmst";
 
 export const RADAR_LAYER = "conus_bref_qcd";
 export const RADAR_SOURCE = {
@@ -93,6 +97,79 @@ function extractDbzValue(properties: Record<string, unknown>): number | null {
   return null;
 }
 
+function iemRadarTime(isoTime: string) {
+  const parsed = Date.parse(isoTime);
+  const target = Number.isFinite(parsed) ? parsed : Date.now();
+  return new Date(Math.floor(target / (5 * 60_000)) * (5 * 60_000)).toISOString();
+}
+
+function approximateDbzFromPixel(r: number, g: number, b: number, a: number): number {
+  if (a < 24 || (r < 20 && g < 20 && b < 20)) return 0;
+
+  // IEM renders the familiar NEXRAD reflectivity ramp. Threat logic only needs
+  // broad intensity bands, not lab-grade dBZ, so classify by the displayed
+  // radar color when NOAA GetFeatureInfo is unavailable.
+  if (r > 180 && b > 120 && g < 120) return 60; // magenta/purple
+  if (r > 180 && g < 120 && b < 120) return 50; // red
+  if (r > 180 && g >= 120 && g < 220 && b < 100) return 45; // orange
+  if (r > 180 && g >= 180 && b < 120) return 40; // yellow
+  if (g > r * 1.2 && g > b * 1.15 && g > 90) return 25; // green
+  if (b > r * 1.15 && b >= g * 0.8) return 15; // blue
+  if (g > 100 && b > 100) return 10; // cyan/light blue
+  return 5;
+}
+
+async function getIemRadarPointReflectivity(lat: number, lon: number, isoTime: string): Promise<number | null> {
+  const center = toMercator(lat, lon);
+  const halfSizeMeters = 1200;
+  const size = 7;
+  const url = new URL(IEM_N0Q_WMS);
+  url.search = new URLSearchParams({
+    service: "WMS",
+    version: "1.1.1",
+    request: "GetMap",
+    layers: IEM_N0Q_LAYER,
+    styles: "default",
+    format: "image/png",
+    transparent: "true",
+    srs: "EPSG:3857",
+    bbox: [
+      center.x - halfSizeMeters,
+      center.y - halfSizeMeters,
+      center.x + halfSizeMeters,
+      center.y + halfSizeMeters,
+    ].join(","),
+    width: String(size),
+    height: String(size),
+    time: iemRadarTime(isoTime),
+  }).toString();
+
+  try {
+    const response = await fetch(url, { next: { revalidate: 60 } });
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.ok || !contentType.toLowerCase().includes("image/")) return null;
+
+    const png = PNG.sync.read(Buffer.from(await response.arrayBuffer()));
+    const cx = Math.floor(png.width / 2);
+    const cy = Math.floor(png.height / 2);
+    let strongest = 0;
+
+    for (let y = Math.max(0, cy - 1); y <= Math.min(png.height - 1, cy + 1); y++) {
+      for (let x = Math.max(0, cx - 1); x <= Math.min(png.width - 1, cx + 1); x++) {
+        const index = (y * png.width + x) * 4;
+        strongest = Math.max(
+          strongest,
+          approximateDbzFromPixel(png.data[index], png.data[index + 1], png.data[index + 2], png.data[index + 3]),
+        );
+      }
+    }
+    return strongest;
+  } catch (error) {
+    console.error("IEM radar point fallback failed", error);
+    return null;
+  }
+}
+
 export async function getRadarPointReflectivity(lat: number, lon: number, isoTime: string): Promise<number | null> {
   const center = toMercator(lat, lon);
   const halfSizeMeters = 400;
@@ -124,11 +201,11 @@ export async function getRadarPointReflectivity(lat: number, lon: number, isoTim
     rawText = await response.text();
     if (!response.ok) {
       console.error(`Radar point reflectivity: HTTP ${response.status}`, rawText.slice(0, 500));
-      return null;
+      return getIemRadarPointReflectivity(lat, lon, isoTime);
     }
   } catch (error) {
     console.error("Radar point reflectivity: request failed", error);
-    return null;
+    return getIemRadarPointReflectivity(lat, lon, isoTime);
   }
 
   let payload: unknown;
@@ -136,18 +213,19 @@ export async function getRadarPointReflectivity(lat: number, lon: number, isoTim
     payload = JSON.parse(rawText);
   } catch {
     console.error("Radar point reflectivity: non-JSON response", rawText.slice(0, 500));
-    return null;
+    return getIemRadarPointReflectivity(lat, lon, isoTime);
   }
 
   const feature = (payload as { features?: Array<{ properties?: Record<string, unknown> }> })?.features?.[0];
   if (!feature?.properties) {
     console.error("Radar point reflectivity: no feature in response", JSON.stringify(payload).slice(0, 500));
-    return null;
+    return getIemRadarPointReflectivity(lat, lon, isoTime);
   }
 
   const value = extractDbzValue(feature.properties);
   if (value === null) {
     console.error("Radar point reflectivity: no numeric property found", JSON.stringify(feature.properties));
+    return getIemRadarPointReflectivity(lat, lon, isoTime);
   }
   return value;
 }
