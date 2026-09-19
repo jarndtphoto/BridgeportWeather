@@ -46,6 +46,7 @@ export async function GET(request: Request) {
   const rawTime = params.get("time") ?? params.get("TIME");
   const time = rawTime && Number.isFinite(Date.parse(rawTime)) ? new Date(rawTime).toISOString() : null;
   const live = params.get("live") === "1";
+  const forceIem = params.get("iem") === "1";
   if (!bbox || !width || !height || !time) {
     return Response.json({ error: "Invalid radar image request." }, { status: 400 });
   }
@@ -67,7 +68,7 @@ export async function GET(request: Request) {
   }).toString();
 
   try {
-    const noaa = live ? null : await fetchImage(noaaUrl, 60);
+    const noaa = live || forceIem ? null : await fetchImage(noaaUrl, 60);
     if (noaa) {
       return new Response(noaa.body, {
         headers: {
