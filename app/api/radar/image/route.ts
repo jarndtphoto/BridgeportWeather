@@ -2,8 +2,8 @@ import { RADAR_LAYER, radarWmsUrl } from "../../../../lib/radar";
 
 export const dynamic = "force-dynamic";
 
-const IEM_RADAR_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r-t.cgi";
-const IEM_RADAR_LAYER = "nexrad-n0r-wmst";
+const IEM_RADAR_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q-t.cgi";
+const IEM_RADAR_LAYER = "nexrad-n0q-wmst";
 
 function validSize(value: string | null) {
   const number = Number(value);
@@ -105,7 +105,7 @@ export async function GET(request: Request) {
       headers: {
         "Content-Type": iem.contentType,
         "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
-        "X-Radar-Source": "IEM-NEXRAD-FALLBACK",
+        "X-Radar-Source": "IEM-NEXRAD-N0Q-FALLBACK",
       },
     });
   } catch {
