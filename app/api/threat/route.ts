@@ -65,20 +65,18 @@ export async function GET() {
   const latestFrame = frames[frames.length - 1] ?? null;
   const radarFrameAgeMinutes = latestFrame ? (Date.now() - Date.parse(latestFrame.observedAt)) / 60_000 : Infinity;
   const radarFrameStale = radarFrameAgeMinutes > 10;
-  const analysisFrames = radarFrameStale || !latestFrame ? fallbackAnalysisFrames() : frames;
+  // Home radar analysis now follows the same reliable IEM N0Q source as Live
+  // Radar instead of waiting on NOAA's unstable WMS/GetFeatureInfo services.
+  const analysisFrames = fallbackAnalysisFrames();
   const analysisLatestFrame = analysisFrames[analysisFrames.length - 1] ?? null;
   const windGustMph = snapshot ? numberField(snapshot.rawObservation, "windgustmph") : null;
   const hourlyRainIn = snapshot ? numberField(snapshot.rawObservation, "rainratein") ?? numberField(snapshot.rawObservation, "rainrate") ?? numberField(snapshot.rawObservation, "hourlyrainin") : null;
   const pressureInHg = snapshot ? numberField(snapshot.rawObservation, "baromrelin") ?? numberField(snapshot.rawObservation, "baromabsin") : null;
   const pressureTrendInHgPerHr = recordPressure(pressureInHg);
-  const [rawRadarSample, radarEchoVisible] = analysisLatestFrame
-    ? await Promise.all([
-        radarFrameStale
-          ? getIemRadarPointReflectivity(BRIDGEPORT_LAT, BRIDGEPORT_LON, analysisLatestFrame.observedAt)
-          : getRadarPointReflectivity(BRIDGEPORT_LAT, BRIDGEPORT_LON, analysisLatestFrame.observedAt),
-        radarFrameStale ? Promise.resolve(null) : visibleRadarEchoAtBridgeport(analysisLatestFrame.observedAt),
-      ])
-    : [null, null];
+  const rawRadarSample = analysisLatestFrame
+    ? await getIemRadarPointReflectivity(BRIDGEPORT_LAT, BRIDGEPORT_LON, analysisLatestFrame.observedAt)
+    : null;
+  const radarEchoVisible = rawRadarSample === null ? null : rawRadarSample > 0;
   // The WMS feature-info value can be a palette/gray index rather than physical dBZ. Only treat it as a local radar signal when the rendered MRMS image actually shows an echo over Bridgeport.
   const radarDbz = radarEchoVisible === false ? null : rawRadarSample;
 
@@ -110,9 +108,9 @@ export async function GET() {
       surfaceWindFromDeg: null,
     };
   } else {
-    evolution = await assessStormEvolution(BRIDGEPORT_LAT, BRIDGEPORT_LON, analysisFrames, radarDbz, hourlyRainIn, forecastDry, null, null, radarFrameStale);
+    evolution = await assessStormEvolution(BRIDGEPORT_LAT, BRIDGEPORT_LON, analysisFrames, radarDbz, hourlyRainIn, forecastDry, null, null, true);
   }
 
   const assessment = assessThreat({ windGustMph, hourlyRainIn, radarDbz, strongestNearbyDbz: evolution.strongestNearbyDbz, stormTrend: evolution.trend, stormMotion: evolution.motion, pressureTrendInHgPerHr, alertsHere: alerts.here, alertsNearby: alerts.nearby, probSevereStorm: probSevere.storm });
-  return Response.json({ assessment, evolution, probSevere, forecast: { nearTermDry: forecastDry }, inputs: { windGustMph, hourlyRainIn, radarDbz, radarEchoVisible, strongestNearbyDbz: evolution.strongestNearbyDbz, stormTrend: evolution.trend, stormMotion: evolution.motion, pressureTrendInHgPerHr, stationOnline: snapshot !== null, radarFrameTime: analysisLatestFrame?.observedAt ?? latestFrame?.observedAt ?? null, radarFrameAgeMinutes: Number.isFinite(radarFrameAgeMinutes) ? radarFrameAgeMinutes : null, radarFrameStale, radarAnalysisSource: radarFrameStale ? "IEM-N0Q-FALLBACK" : "NOAA-MRMS", alertCountHere: alerts.here.length, alertCountNearby: alerts.nearby.length } }, { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" } });
+  return Response.json({ assessment, evolution, probSevere, forecast: { nearTermDry: forecastDry }, inputs: { windGustMph, hourlyRainIn, radarDbz, radarEchoVisible, strongestNearbyDbz: evolution.strongestNearbyDbz, stormTrend: evolution.trend, stormMotion: evolution.motion, pressureTrendInHgPerHr, stationOnline: snapshot !== null, radarFrameTime: analysisLatestFrame?.observedAt ?? latestFrame?.observedAt ?? null, radarFrameAgeMinutes: Number.isFinite(radarFrameAgeMinutes) ? radarFrameAgeMinutes : null, radarFrameStale, radarAnalysisSource: "IEM-N0Q", alertCountHere: alerts.here.length, alertCountNearby: alerts.nearby.length } }, { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" } });
 }
