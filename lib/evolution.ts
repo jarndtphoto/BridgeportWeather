@@ -1,5 +1,5 @@
 import "server-only";
-import { getRadarPointReflectivity, type RadarFrame } from "./radar";
+import { getRadarPointReflectivity, getIemRadarPointReflectivity, type RadarFrame } from "./radar";
 import { getAmbientSnapshot } from "./ambient";
 
 export type StormTrend = "strengthening" | "steady" | "weakening" | "quiet" | "unknown";
@@ -31,21 +31,22 @@ function windSupportsApproach(strongest:Sample|null,windSpeedMph:number|null,win
 function numberField(observation:Record<string,unknown>,key:string){const value=observation[key];return typeof value==="number"&&Number.isFinite(value)?value:null}
 async function resolveSurfaceWind(speed:number|null,fromDeg:number|null){if(speed!==null&&fromDeg!==null)return{speed,fromDeg};try{const snapshot=await getAmbientSnapshot();const o=snapshot.rawObservation as Record<string,unknown>;return{speed:speed??numberField(o,"windspeedmph")??numberField(o,"windspdmph_avg10m"),fromDeg:fromDeg??numberField(o,"winddir")}}catch{return{speed,fromDeg}}}
 
-export async function assessStormEvolution(lat:number,lon:number,frames:RadarFrame[],bridgeportDbz:number|null,stationRainIn:number|null=null,nearTermForecastDry:boolean|null=null,surfaceWindMph:number|null=null,surfaceWindFromDeg:number|null=null):Promise<StormEvolution>{
+export async function assessStormEvolution(lat:number,lon:number,frames:RadarFrame[],bridgeportDbz:number|null,stationRainIn:number|null=null,nearTermForecastDry:boolean|null=null,surfaceWindMph:number|null=null,surfaceWindFromDeg:number|null=null,useIemOnly=false):Promise<StormEvolution>{
  const wind=await resolveSurfaceWind(surfaceWindMph,surfaceWindFromDeg);
  const latest=frames[frames.length-1]??null;if(!latest)return{trend:"unknown",motion:"unknown",relevance:"unknown",headline:"Radar information unavailable",detail:"Recent radar information is unavailable.",strongestSector:null,strongestNearbyDbz:null,strongestRadiusMiles:null,bridgeportDbz,previousBridgeportDbz:null,sampledRadiusMiles:SAMPLE_RADIUS_MILES,comparisonMinutes:null,estimatedArrivalMinutes:null,estimatedArrivalWindowMinutes:null,closestApproachMiles:null,windAssist:false,surfaceWindMph:wind.speed,surfaceWindFromDeg:wind.fromDeg};
 
- const samples:Sample[]=await Promise.all(DIRECTIONS.flatMap(direction=>RADII_MILES.map(async radiusMiles=>{const point=destinationPoint(lat,lon,direction.bearing,radiusMiles);const dbz=await getRadarPointReflectivity(point.lat,point.lon,latest.observedAt);return{...direction,...point,radiusMiles,dbz}})));
+ const sampleReflectivity=useIemOnly?getIemRadarPointReflectivity:getRadarPointReflectivity;
+ const samples:Sample[]=await Promise.all(DIRECTIONS.flatMap(direction=>RADII_MILES.map(async radiusMiles=>{const point=destinationPoint(lat,lon,direction.bearing,radiusMiles);const dbz=await sampleReflectivity(point.lat,point.lon,latest.observedAt);return{...direction,...point,radiusMiles,dbz}})));
  const valid=samples.filter((s):s is Sample&{dbz:number}=>s.dbz!==null&&Number.isFinite(s.dbz));
  const strongest=valid.reduce<(typeof valid)[number]|null>((best,s)=>!best||s.dbz>best.dbz?s:best,null);
  const prior=previousFrame(frames,latest);
  const activeLabels=new Set(samples.filter(s=>(s.dbz??-Infinity)>=WEAK_ECHO_DBZ).map(s=>s.label));
- const previousSamples:Sample[]=prior?await Promise.all(samples.filter(s=>activeLabels.has(s.label)).map(async s=>({...s,dbz:await getRadarPointReflectivity(s.lat,s.lon,prior.observedAt)}))):[];
+ const previousSamples:Sample[]=prior?await Promise.all(samples.filter(s=>activeLabels.has(s.label)).map(async s=>({...s,dbz:await sampleReflectivity(s.lat,s.lon,prior.observedAt)}))):[];
  const sector=strongest?samples.filter(s=>s.label===strongest.label):[];
  const previousSector=strongest?previousSamples.filter(s=>s.label===strongest.label):[];
  const currentInner=sector.find(s=>s.radiusMiles===INNER_RADIUS_MILES)?.dbz??null,currentOuter=sector.find(s=>s.radiusMiles===OUTER_RADIUS_MILES)?.dbz??null;
  const previousInner=previousSector.find(s=>s.radiusMiles===INNER_RADIUS_MILES)?.dbz??null,previousOuter=previousSector.find(s=>s.radiusMiles===OUTER_RADIUS_MILES)?.dbz??null;
- const previousBridgeportDbz=prior?await getRadarPointReflectivity(lat,lon,prior.observedAt):null;
+ const previousBridgeportDbz=prior?await sampleReflectivity(lat,lon,prior.observedAt):null;
  const previousStrongestDbz=strongest?previousSector.find(s=>s.radiusMiles===strongest.radiusMiles)?.dbz??null:null;
  const strongestNearbyDbz=strongest?.dbz??null;
  const nearbyTrend=trendFromChange(strongestNearbyDbz,previousStrongestDbz),localTrend=trendFromChange(bridgeportDbz,previousBridgeportDbz),trend=bridgeportDbz!==null&&bridgeportDbz>=20?localTrend:nearbyTrend;
