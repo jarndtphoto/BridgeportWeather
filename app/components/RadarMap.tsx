@@ -37,6 +37,7 @@ export default function RadarMap() {
   const renderTokenRef = useRef(0);
   const frameIndexRef = useRef(0);
   const framesLengthRef = useRef(0);
+  const followingLiveRef = useRef(true);
   const [frames, setFrames] = useState<RadarFrame[]>([]);
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -52,6 +53,7 @@ export default function RadarMap() {
   useEffect(() => { framesLengthRef.current = frames.length; }, [frames.length]);
 
   const resetLiveView = useCallback(() => {
+    followingLiveRef.current = true;
     setPlaying(false);
     setMapInteraction(false);
     setFrameIndex(Math.max(0, framesLengthRef.current - 1));
@@ -72,9 +74,13 @@ export default function RadarMap() {
       if (!payload.frames.length) throw new Error("No radar frames available");
       framesLengthRef.current = payload.frames.length;
       setFrames((current) => {
-        const currentId = current[frameIndexRef.current]?.id;
-        const retainedIndex = payload.frames.findIndex((frame) => frame.id === currentId);
-        setFrameIndex(retainedIndex >= 0 ? retainedIndex : payload.frames.length - 1);
+        if (followingLiveRef.current) {
+          setFrameIndex(payload.frames.length - 1);
+        } else {
+          const currentId = current[frameIndexRef.current]?.id;
+          const retainedIndex = payload.frames.findIndex((frame) => frame.id === currentId);
+          setFrameIndex(retainedIndex >= 0 ? retainedIndex : payload.frames.length - 1);
+        }
         return payload.frames;
       });
       setStatus("ready");
@@ -246,6 +252,7 @@ export default function RadarMap() {
   const currentFrame = frames[frameIndex];
   const isNewest = frameIndex === frames.length - 1;
   const setLayer = (layer: LiveLayer) => {
+    followingLiveRef.current = true;
     setPlaying(false);
     setMapInteraction(false);
     setFrameIndex(Math.max(0, framesLengthRef.current - 1));
@@ -281,9 +288,9 @@ export default function RadarMap() {
       </div>
       {liveLayer === "precipitation" ? (
         <div className="radarControls">
-          <button type="button" onClick={() => setPlaying((value) => !value)} disabled={status !== "ready"} aria-label={playing ? "Pause radar animation" : "Play radar animation"}><span aria-hidden="true">{playing ? "Ⅱ" : "▶"}</span> {playing ? "Pause" : "Play"}</button>
-          <input type="range" min="0" max={Math.max(0, frames.length - 1)} value={frameIndex} onChange={(event) => { setPlaying(false); setFrameIndex(Number(event.target.value)); }} disabled={!frames.length} aria-label="Radar observation timeline" />
-          <button type="button" className="newestButton" onClick={() => { setPlaying(false); setFrameIndex(Math.max(0, frames.length - 1)); }} disabled={!frames.length || isNewest}>Current Radar</button>
+          <button type="button" onClick={() => { followingLiveRef.current = false; setPlaying((value) => !value); }} disabled={status !== "ready"} aria-label={playing ? "Pause radar animation" : "Play radar animation"}><span aria-hidden="true">{playing ? "Ⅱ" : "▶"}</span> {playing ? "Pause" : "Play"}</button>
+          <input type="range" min="0" max={Math.max(0, frames.length - 1)} value={frameIndex} onChange={(event) => { followingLiveRef.current = false; setPlaying(false); setFrameIndex(Number(event.target.value)); }} disabled={!frames.length} aria-label="Radar observation timeline" />
+          <button type="button" className="newestButton" onClick={() => { followingLiveRef.current = true; setPlaying(false); setFrameIndex(Math.max(0, frames.length - 1)); }} disabled={!frames.length || isNewest}>Current Radar</button>
         </div>
       ) : <div className="cloudLayerNote">Latest GOES-East infrared image · refreshes automatically</div>}
       {status === "error" && liveLayer === "precipitation" && <p className="radarError">NOAA radar is temporarily unavailable. The app will retry automatically.</p>}
