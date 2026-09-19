@@ -1,7 +1,7 @@
 "use client";
 
 import type * as Leaflet from "leaflet";
-import type { ImageOverlay, Map as LeafletMap } from "leaflet";
+import type { ImageOverlay, Map as LeafletMap, TileLayer } from "leaflet";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
@@ -19,7 +19,7 @@ function frameLabel(value?: string) {
   return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" }).format(new Date(value));
 }
 
-function fadeLayer(layer: ImageOverlay, targetOpacity: number) {
+function fadeLayer(layer: ImageOverlay | TileLayer, targetOpacity: number) {
   const started = performance.now();
   const tick = (now: number) => {
     const progress = Math.min(1, (now - started) / LIVE_FADE_MS);
@@ -33,7 +33,7 @@ export default function RadarMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<typeof Leaflet | null>(null);
-  const radarLayerRef = useRef<ImageOverlay | null>(null);
+  const radarLayerRef = useRef<ImageOverlay | TileLayer | null>(null);
   const renderTokenRef = useRef(0);
   const frameIndexRef = useRef(0);
   const framesLengthRef = useRef(0);
@@ -179,40 +179,38 @@ export default function RadarMap() {
     const width = Math.round(size.x * scale);
     const height = Math.round(size.y * scale);
 
-    let url: string;
     let opacity: number;
-    if (liveLayer === "clouds") {
-      const params = new URLSearchParams({
-        SERVICE: "WMS",
-        VERSION: "1.1.1",
-        REQUEST: "GetMap",
-        LAYERS: "conus_ch13",
-        STYLES: "",
-        FORMAT: "image/png",
-        TRANSPARENT: "true",
-        SRS: "EPSG:3857",
-        BBOX: `${sw.x},${sw.y},${ne.x},${ne.y}`,
-        WIDTH: String(width),
-        HEIGHT: String(height),
-        _: String(cloudRevision),
-      });
-      url = `${GOES_WMS}?${params.toString()}`;
-      opacity = 0.72;
-    } else {
-      const params = new URLSearchParams({
-        bbox: `${sw.x},${sw.y},${ne.x},${ne.y}`,
-        width: String(width),
-        height: String(height),
-        time: frame.observedAt,
-        iem: "1",
-      });
-      if (followingLiveRef.current && frameIndex === frames.length - 1) params.set("live", "1");
-      url = `/api/radar/image?${params.toString()}`;
-      opacity = 0.58;
-    }
-
     const token = ++renderTokenRef.current;
-    const next = L.imageOverlay(url, bounds, { opacity: 0, pane: "weather", interactive: false }).addTo(map);
+    const previous = radarLayerRef.current;
+
+    // Live precipitation uses IEM's dedicated tiled NEXRAD service. The current
+    // layer plus the documented m05m...m55m layers provide a reliable one-hour
+    // animation without depending on NOAA WMS timestamps.
+    const ageMinutes = Math.max(0, (frames.length - 1 - frameIndex) * 5);
+    const next: ImageOverlay | TileLayer = liveLayer === "precipitation"
+      ? L.tileLayer(
+          `https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/${ageMinutes === 0 ? "nexrad-n0q" : `nexrad-n0q-m${String(ageMinutes).padStart(2, "0")}m`}/{z}/{x}/{y}.png`,
+          { opacity: 0, pane: "weather", maxZoom: 19, attribution: "NEXRAD via Iowa Environmental Mesonet" },
+        ).addTo(map)
+      : L.imageOverlay(
+          `${GOES_WMS}?${new URLSearchParams({
+            SERVICE: "WMS",
+            VERSION: "1.1.1",
+            REQUEST: "GetMap",
+            LAYERS: "conus_ch13",
+            STYLES: "",
+            FORMAT: "image/png",
+            TRANSPARENT: "true",
+            SRS: "EPSG:3857",
+            BBOX: `${sw.x},${sw.y},${ne.x},${ne.y}`,
+            WIDTH: String(width),
+            HEIGHT: String(height),
+            _: String(cloudRevision),
+          }).toString()}`,
+          bounds,
+          { opacity: 0, pane: "weather", interactive: false },
+        ).addTo(map);
+    opacity = liveLayer === "clouds" ? 0.72 : 0.58;
     let promoted = false;
     let removalTimer: number | null = null;
 
@@ -223,7 +221,6 @@ export default function RadarMap() {
         if (map.hasLayer(next)) map.removeLayer(next);
         return;
       }
-      const previous = radarLayerRef.current;
       radarLayerRef.current = next;
       fadeLayer(next, opacity);
       removalTimer = window.setTimeout(() => {
@@ -259,13 +256,16 @@ export default function RadarMap() {
     ? new Date(Math.floor((Date.now() - 5 * 60_000) / (5 * 60_000)) * (5 * 60_000)).toISOString()
     : currentFrame?.observedAt;
   const setLayer = (layer: LiveLayer) => {
+    const map = mapRef.current;
+    const existing = radarLayerRef.current;
+    if (map && existing && map.hasLayer(existing)) map.removeLayer(existing);
+    radarLayerRef.current = null;
     followingLiveRef.current = true;
     setPlaying(false);
     setMapInteraction(false);
     setFrameIndex(Math.max(0, framesLengthRef.current - 1));
     setLiveLayer(layer);
     if (layer === "clouds") setCloudRevision((value) => value + 1);
-    const map = mapRef.current;
     if (map) {
       map.setView(LOCAL_TARGET, DEFAULT_ZOOM, { animate: false });
       window.requestAnimationFrame(() => {
@@ -281,7 +281,7 @@ export default function RadarMap() {
 
   return (
     <section className="radarSection" id="radar" aria-labelledby="radar-heading">
-      <div className="sectionTitle radarHeading"><div><p className="kicker">LIVE OBSERVATIONS</p><h2 id="radar-heading">Bridgeport radar</h2></div><span className={`radarFreshness ${status}`}>{status === "ready" ? "NOAA LIVE" : status.toUpperCase()}</span></div>
+      <div className="sectionTitle radarHeading"><div><p className="kicker">LIVE OBSERVATIONS</p><h2 id="radar-heading">Bridgeport radar</h2></div><span className={`radarFreshness ${status}`}>{status === "ready" ? "NEXRAD LIVE" : status.toUpperCase()}</span></div>
       <div className="weatherLayerToggle" role="group" aria-label="Live weather layer">
         <button type="button" className={liveLayer === "precipitation" ? "active" : ""} onClick={() => setLayer("precipitation")}>Precipitation</button>
         <button type="button" className={liveLayer === "clouds" ? "active" : ""} onClick={() => setLayer("clouds")}>Cloud Cover</button>
@@ -301,7 +301,7 @@ export default function RadarMap() {
         </div>
       ) : <div className="cloudLayerNote">Latest GOES-East infrared image · refreshes automatically</div>}
       {status === "error" && liveLayer === "precipitation" && <p className="radarError">NOAA radar is temporarily unavailable. The app will retry automatically.</p>}
-      <p className="radarSource">{liveLayer === "precipitation" ? "NOAA/NWS MRMS quality-controlled base reflectivity · high-resolution observed radar · typically updates about every 2 minutes" : "NOAA GOES-East infrared Channel 13 via Iowa Environmental Mesonet · near-real-time cloud-top imagery · available day and night"}</p>
+      <p className="radarSource">{liveLayer === "precipitation" ? "NEXRAD base reflectivity via Iowa Environmental Mesonet · observed radar · updates about every 5 minutes" : "NOAA GOES-East infrared Channel 13 via Iowa Environmental Mesonet · near-real-time cloud-top imagery · available day and night"}</p>
     </section>
   );
 }
