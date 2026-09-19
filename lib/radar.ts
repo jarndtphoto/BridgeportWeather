@@ -11,56 +11,17 @@ export const RADAR_SOURCE = {
 
 export type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
 
-function parseRadarTimes(value: string) {
-  return [...value.matchAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g)]
-    .map((item) => item[0])
-    .filter((time, index, list) => list.indexOf(time) === index)
-    .map((observedAt) => ({ observedAt, epochSeconds: Math.floor(Date.parse(observedAt) / 1000) }))
-    .filter((frame) => Number.isFinite(frame.epochSeconds))
-    .sort((a, b) => a.epochSeconds - b.epochSeconds);
-}
-
-function radarTimeCandidates(xml: string) {
-  // Read the time dimension belonging to the actual conus_bref_qcd layer first.
-  // NOAA's capabilities response can contain time dimensions for other layers;
-  // mixing those timestamps with this layer produces blank GetMap images.
-  const layerName = new RegExp(`<Name>\\s*${RADAR_LAYER}\\s*</Name>`, "i");
-  const nameMatch = layerName.exec(xml);
-  if (nameMatch) {
-    const afterName = xml.slice(nameMatch.index + nameMatch[0].length);
-    const nextLayer = afterName.search(/<Layer\b/i);
-    const layerChunk = nextLayer >= 0 ? afterName.slice(0, nextLayer) : afterName;
-    const timeMatch = layerChunk.match(/<(?:Dimension|Extent)\b[^>]*name=["']time["'][^>]*>([\s\S]*?)<\/(?:Dimension|Extent)>/i);
-    if (timeMatch) {
-      const frames = parseRadarTimes(timeMatch[1]);
-      if (frames.length) return [frames];
-    }
-  }
-
-  // Fallback for unexpected capabilities formatting.
-  return [...xml.matchAll(/<(?:Dimension|Extent)\b[^>]*name=["']time["'][^>]*>([\s\S]*?)<\/(?:Dimension|Extent)>/gi)]
-    .map((match) => parseRadarTimes(match[1]))
-    .filter((frames) => frames.length > 0);
-}
-
 export async function getRadarFrames(): Promise<RadarFrame[]> {
   const url = new URL(NOAA_RADAR_WMS);
   url.search = new URLSearchParams({ service: "WMS", version: "1.3.0", request: "GetCapabilities" }).toString();
-  const response = await fetch(url, { next: { revalidate: 30 } });
+  const response = await fetch(url, { next: { revalidate: 60 } });
   if (!response.ok) throw new Error(`NOAA radar metadata returned ${response.status}`);
   const xml = await response.text();
-
-  // NOAA's capabilities document contains multiple time dimensions. Do not use
-  // the first one blindly: it can belong to a different/stale layer. Pick the
-  // candidate whose newest timestamp is freshest, then keep the newest 30.
-  const candidates = radarTimeCandidates(xml);
-  if (!candidates.length) throw new Error("NOAA radar metadata did not include frame timestamps");
-  const allFrames = candidates.reduce((best, frames) => {
-    const bestLatest = best[best.length - 1]?.epochSeconds ?? -Infinity;
-    const latest = frames[frames.length - 1]?.epochSeconds ?? -Infinity;
-    return latest > bestLatest || (latest === bestLatest && frames.length > best.length) ? frames : best;
-  }, [] as Array<{ observedAt: string; epochSeconds: number }>);
-
+  const dimension = xml.match(/<Dimension[^>]+name=["']time["'][^>]*>([^<]+)<\/Dimension>/i)?.[1];
+  if (!dimension) throw new Error("NOAA radar metadata did not include frame timestamps");
+  const allFrames = dimension.split(",").map((value) => value.trim()).filter(Boolean)
+    .map((observedAt) => ({ observedAt, epochSeconds: Math.floor(Date.parse(observedAt) / 1000) }))
+    .filter((frame) => Number.isFinite(frame.epochSeconds));
   return allFrames.slice(-30).map((frame) => ({ ...frame, id: String(frame.epochSeconds) }));
 }
 
