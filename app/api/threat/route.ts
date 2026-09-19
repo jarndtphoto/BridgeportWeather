@@ -1,5 +1,5 @@
 import { getAmbientSnapshot } from "../../../lib/ambient";
-import { getRadarFrames, getRadarPointReflectivity, radarWmsUrl, RADAR_LAYER } from "../../../lib/radar";
+import { getRadarFrames, getRadarPointReflectivity, getIemRadarPointReflectivity, radarWmsUrl, RADAR_LAYER } from "../../../lib/radar";
 import { getNwsAlerts } from "../../../lib/nws";
 import { getProbSevereNear } from "../../../lib/probsevere";
 import { assessThreat } from "../../../lib/threat";
@@ -73,7 +73,9 @@ export async function GET() {
   const pressureTrendInHgPerHr = recordPressure(pressureInHg);
   const [rawRadarSample, radarEchoVisible] = analysisLatestFrame
     ? await Promise.all([
-        getRadarPointReflectivity(BRIDGEPORT_LAT, BRIDGEPORT_LON, analysisLatestFrame.observedAt),
+        radarFrameStale
+          ? getIemRadarPointReflectivity(BRIDGEPORT_LAT, BRIDGEPORT_LON, analysisLatestFrame.observedAt)
+          : getRadarPointReflectivity(BRIDGEPORT_LAT, BRIDGEPORT_LON, analysisLatestFrame.observedAt),
         radarFrameStale ? Promise.resolve(null) : visibleRadarEchoAtBridgeport(analysisLatestFrame.observedAt),
       ])
     : [null, null];
@@ -108,7 +110,7 @@ export async function GET() {
       surfaceWindFromDeg: null,
     };
   } else {
-    evolution = await assessStormEvolution(BRIDGEPORT_LAT, BRIDGEPORT_LON, analysisFrames, radarDbz, hourlyRainIn, forecastDry);
+    evolution = await assessStormEvolution(BRIDGEPORT_LAT, BRIDGEPORT_LON, analysisFrames, radarDbz, hourlyRainIn, forecastDry, null, null, radarFrameStale);
   }
 
   const assessment = assessThreat({ windGustMph, hourlyRainIn, radarDbz, strongestNearbyDbz: evolution.strongestNearbyDbz, stormTrend: evolution.trend, stormMotion: evolution.motion, pressureTrendInHgPerHr, alertsHere: alerts.here, alertsNearby: alerts.nearby, probSevereStorm: probSevere.storm });
