@@ -7,34 +7,36 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
 type RadarPayload = { frames: RadarFrame[] };
 type LiveLayer = "precipitation" | "clouds";
-
 const LOCAL_TARGET: [number, number] = [41.8382, -87.6331];
 const DEFAULT_ZOOM = 8;
 const BASEMAP = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const BASEMAP_ATTRIBUTION = "&copy; OpenStreetMap contributors";
 const GOES_WMS = "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes_east.cgi";
+const LIVE_FADE_MS = 320;
 
 function frameLabel(value?: string) {
   if (!value) return "Waiting for NOAA";
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZoneName: "short",
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" }).format(new Date(value));
+}
+
+function fadeLayer(layer: ImageOverlay, targetOpacity: number) {
+  const started = performance.now();
+  const tick = (now: number) => {
+    const progress = Math.min(1, (now - started) / LIVE_FADE_MS);
+    layer.setOpacity(targetOpacity * progress);
+    if (progress < 1) window.requestAnimationFrame(tick);
+  };
+  window.requestAnimationFrame(tick);
 }
 
 export default function RadarMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<typeof Leaflet | null>(null);
-  const currentOverlayRef = useRef<ImageOverlay | null>(null);
-  const pendingOverlayRef = useRef<ImageOverlay | null>(null);
+  const radarLayerRef = useRef<ImageOverlay | null>(null);
   const renderTokenRef = useRef(0);
   const frameIndexRef = useRef(0);
   const framesLengthRef = useRef(0);
-
   const [frames, setFrames] = useState<RadarFrame[]>([]);
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -49,24 +51,10 @@ export default function RadarMap() {
   useEffect(() => { frameIndexRef.current = frameIndex; }, [frameIndex]);
   useEffect(() => { framesLengthRef.current = frames.length; }, [frames.length]);
 
-  const removeOverlay = useCallback((overlay: ImageOverlay | null) => {
-    const map = mapRef.current;
-    if (map && overlay && map.hasLayer(overlay)) map.removeLayer(overlay);
-  }, []);
-
-  const clearWeatherOverlays = useCallback(() => {
-    renderTokenRef.current += 1;
-    removeOverlay(pendingOverlayRef.current);
-    removeOverlay(currentOverlayRef.current);
-    pendingOverlayRef.current = null;
-    currentOverlayRef.current = null;
-  }, [removeOverlay]);
-
   const resetLiveView = useCallback(() => {
     setPlaying(false);
     setMapInteraction(false);
     setFrameIndex(Math.max(0, framesLengthRef.current - 1));
-    clearWeatherOverlays();
     const map = mapRef.current;
     if (!map) return;
     map.setView(LOCAL_TARGET, DEFAULT_ZOOM, { animate: false });
@@ -74,11 +62,11 @@ export default function RadarMap() {
       map.invalidateSize(false);
       setViewRevision((value) => value + 1);
     });
-  }, [clearWeatherOverlays]);
+  }, []);
 
   const loadFrames = useCallback(async () => {
     try {
-      const response = await fetch(`/api/radar/frames?t=${Date.now()}`, { cache: "no-store" });
+      const response = await fetch("/api/radar/frames", { cache: "no-store" });
       if (!response.ok) throw new Error("Radar metadata unavailable");
       const payload = (await response.json()) as RadarPayload;
       if (!payload.frames.length) throw new Error("No radar frames available");
@@ -90,9 +78,7 @@ export default function RadarMap() {
         return payload.frames;
       });
       setStatus("ready");
-    } catch {
-      setStatus("error");
-    }
+    } catch { setStatus("error"); }
   }, []);
 
   useEffect(() => {
@@ -146,8 +132,6 @@ export default function RadarMap() {
       active = false;
       mapRef.current?.remove();
       mapRef.current = null;
-      currentOverlayRef.current = null;
-      pendingOverlayRef.current = null;
     };
   }, []);
 
@@ -185,7 +169,6 @@ export default function RadarMap() {
     const ne = L.CRS.EPSG3857.project(bounds.getNorthEast());
     const size = map.getSize();
     if (size.x < 100 || size.y < 100) return;
-
     const scale = Math.max(1, Math.min(3, 1800 / size.x, 1800 / size.y));
     const width = Math.round(size.x * scale);
     const height = Math.round(size.y * scale);
@@ -221,54 +204,38 @@ export default function RadarMap() {
     }
 
     const token = ++renderTokenRef.current;
-    removeOverlay(pendingOverlayRef.current);
-
-    // Render the requested radar image at its real opacity immediately.
-    // The previous implementation started every image at opacity 0 and waited
-    // for a Leaflet load event to reveal it. If that event was missed or
-    // interrupted on iOS, a valid radar image could remain invisible forever.
-    const next = L.imageOverlay(url, bounds, { opacity, pane: "weather", interactive: false });
-    pendingOverlayRef.current = next;
-    let settled = false;
+    const next = L.imageOverlay(url, bounds, { opacity: 0, pane: "weather", interactive: false }).addTo(map);
+    let promoted = false;
+    let removalTimer: number | null = null;
 
     const promote = () => {
-      if (settled) return;
-      settled = true;
+      if (promoted) return;
+      promoted = true;
       if (token !== renderTokenRef.current) {
-        removeOverlay(next);
-        if (pendingOverlayRef.current === next) pendingOverlayRef.current = null;
+        if (map.hasLayer(next)) map.removeLayer(next);
         return;
       }
-
-      const previous = currentOverlayRef.current;
-      currentOverlayRef.current = next;
-      pendingOverlayRef.current = null;
-      if (previous && previous !== next) removeOverlay(previous);
+      const previous = radarLayerRef.current;
+      radarLayerRef.current = next;
+      fadeLayer(next, opacity);
+      removalTimer = window.setTimeout(() => {
+        if (previous && previous !== next && map.hasLayer(previous)) map.removeLayer(previous);
+      }, LIVE_FADE_MS + 60);
     };
 
     const discard = () => {
-      if (settled) return;
-      settled = true;
-      removeOverlay(next);
-      if (pendingOverlayRef.current === next) pendingOverlayRef.current = null;
+      if (map.hasLayer(next)) map.removeLayer(next);
     };
 
-    // Attach handlers before adding the overlay. On iOS, a fast/cached image can
-    // finish loading immediately after addTo(); attaching afterward can miss the
-    // load event and leave the overlay permanently transparent.
     next.once("load", promote);
     next.once("error", discard);
-    next.addTo(map);
-
     return () => {
       next.off("load", promote);
       next.off("error", discard);
-      if (pendingOverlayRef.current === next) {
-        removeOverlay(next);
-        pendingOverlayRef.current = null;
-      }
+      if (removalTimer !== null) window.clearTimeout(removalTimer);
+      if (token !== renderTokenRef.current && radarLayerRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
     };
-  }, [frames, frameIndex, liveLayer, mapReady, viewRevision, cloudRevision, removeOverlay]);
+  }, [frames, frameIndex, liveLayer, mapReady, viewRevision, cloudRevision]);
 
   useEffect(() => {
     if (liveLayer !== "precipitation" || !playing || frames.length < 2 || mapInteraction) return;
@@ -278,16 +245,12 @@ export default function RadarMap() {
 
   const currentFrame = frames[frameIndex];
   const isNewest = frameIndex === frames.length - 1;
-
   const setLayer = (layer: LiveLayer) => {
-    if (layer === liveLayer) return;
     setPlaying(false);
     setMapInteraction(false);
     setFrameIndex(Math.max(0, framesLengthRef.current - 1));
-    clearWeatherOverlays();
     setLiveLayer(layer);
     if (layer === "clouds") setCloudRevision((value) => value + 1);
-
     const map = mapRef.current;
     if (map) {
       map.setView(LOCAL_TARGET, DEFAULT_ZOOM, { animate: false });
@@ -297,7 +260,6 @@ export default function RadarMap() {
       });
     }
   };
-
   const toggleMapInteraction = () => {
     if (!mapInteraction) setPlaying(false);
     setMapInteraction((value) => !value);
