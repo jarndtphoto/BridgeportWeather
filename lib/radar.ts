@@ -11,13 +11,33 @@ export const RADAR_SOURCE = {
 
 export type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
 
-function parseRadarFrames(xml: string): RadarFrame[] {
-  const dimension = xml.match(/<Dimension[^>]+name=["']time["'][^>]*>([^<]+)<\/Dimension>/i)?.[1];
-  if (!dimension) throw new Error("NOAA radar metadata did not include frame timestamps");
-  const allFrames = dimension.split(",").map((value) => value.trim()).filter(Boolean)
+function parseRadarTimes(value: string) {
+  return [...value.matchAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g)]
+    .map((item) => item[0])
+    .filter((time, index, list) => list.indexOf(time) === index)
     .map((observedAt) => ({ observedAt, epochSeconds: Math.floor(Date.parse(observedAt) / 1000) }))
-    .filter((frame) => Number.isFinite(frame.epochSeconds));
-  return allFrames.slice(-30).map((frame) => ({ ...frame, id: String(frame.epochSeconds) }));
+    .filter((frame) => Number.isFinite(frame.epochSeconds))
+    .sort((a, b) => a.epochSeconds - b.epochSeconds);
+}
+
+function parseRadarFrames(xml: string): RadarFrame[] {
+  // NOAA's capabilities document exposes multiple WMS layers with their own
+  // time dimensions. Live Radar must use timestamps from conus_bref_qcd only;
+  // a timestamp from another layer can produce a valid-but-empty PNG.
+  const layerName = new RegExp(`<Name>\\s*${RADAR_LAYER}\\s*</Name>`, "i");
+  const nameMatch = layerName.exec(xml);
+  if (!nameMatch) throw new Error("NOAA radar layer was not found in capabilities");
+
+  const afterName = xml.slice(nameMatch.index + nameMatch[0].length);
+  const nextLayer = afterName.search(/<Layer\b/i);
+  const layerChunk = nextLayer >= 0 ? afterName.slice(0, nextLayer) : afterName;
+  const timeMatch = layerChunk.match(/<(?:Dimension|Extent)\b[^>]*name=["']time["'][^>]*>([\s\S]*?)<\/(?:Dimension|Extent)>/i);
+  if (!timeMatch) throw new Error("NOAA radar layer did not include frame timestamps");
+
+  const frames = parseRadarTimes(timeMatch[1]);
+  if (!frames.length) throw new Error("NOAA radar layer returned no usable frame timestamps");
+
+  return frames.slice(-30).map((frame) => ({ ...frame, id: String(frame.epochSeconds) }));
 }
 
 async function fetchRadarCapabilities(noStore = false): Promise<RadarFrame[]> {
@@ -33,20 +53,18 @@ export async function getRadarFrames(): Promise<RadarFrame[]> {
   const latest = frames[frames.length - 1] ?? null;
   const latestAgeMinutes = latest ? (Date.now() - Date.parse(latest.observedAt)) / 60_000 : Infinity;
 
-  // Next's data cache can occasionally hold an old NOAA capabilities document
-  // after the live WMS has already advanced. Retry uncached before declaring
-  // radar analysis stale so threat assessment follows the actual live feed.
+  // Keep the radar-analysis freshness improvement from the later fix, but only
+  // accept uncached timestamps that belong to the actual MRMS reflectivity layer.
   if (latestAgeMinutes > 10) {
     try {
       const fresh = await fetchRadarCapabilities(true);
       const freshLatest = fresh[fresh.length - 1] ?? null;
-      if (freshLatest && (!latest || freshLatest.epochSeconds > latest.epochSeconds)) {
-        frames = fresh;
-      }
+      if (freshLatest && (!latest || freshLatest.epochSeconds > latest.epochSeconds)) frames = fresh;
     } catch {
       // Keep the cached frame list; callers can still decide whether it is stale.
     }
   }
+
   return frames;
 }
 
