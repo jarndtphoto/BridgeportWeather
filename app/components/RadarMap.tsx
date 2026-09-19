@@ -204,6 +204,7 @@ export default function RadarMap() {
         width: String(width),
         height: String(height),
         time: frame.observedAt,
+        iem: "1",
       });
       if (followingLiveRef.current && frameIndex === frames.length - 1) params.set("live", "1");
       url = `/api/radar/image?${params.toString()}`;
