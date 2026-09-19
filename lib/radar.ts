@@ -11,18 +11,43 @@ export const RADAR_SOURCE = {
 
 export type RadarFrame = { id: string; observedAt: string; epochSeconds: number };
 
-export async function getRadarFrames(): Promise<RadarFrame[]> {
-  const url = new URL(NOAA_RADAR_WMS);
-  url.search = new URLSearchParams({ service: "WMS", version: "1.3.0", request: "GetCapabilities" }).toString();
-  const response = await fetch(url, { next: { revalidate: 60 } });
-  if (!response.ok) throw new Error(`NOAA radar metadata returned ${response.status}`);
-  const xml = await response.text();
+function parseRadarFrames(xml: string): RadarFrame[] {
   const dimension = xml.match(/<Dimension[^>]+name=["']time["'][^>]*>([^<]+)<\/Dimension>/i)?.[1];
   if (!dimension) throw new Error("NOAA radar metadata did not include frame timestamps");
   const allFrames = dimension.split(",").map((value) => value.trim()).filter(Boolean)
     .map((observedAt) => ({ observedAt, epochSeconds: Math.floor(Date.parse(observedAt) / 1000) }))
     .filter((frame) => Number.isFinite(frame.epochSeconds));
   return allFrames.slice(-30).map((frame) => ({ ...frame, id: String(frame.epochSeconds) }));
+}
+
+async function fetchRadarCapabilities(noStore = false): Promise<RadarFrame[]> {
+  const url = new URL(NOAA_RADAR_WMS);
+  url.search = new URLSearchParams({ service: "WMS", version: "1.3.0", request: "GetCapabilities" }).toString();
+  const response = await fetch(url, noStore ? { cache: "no-store" } : { next: { revalidate: 60 } });
+  if (!response.ok) throw new Error(`NOAA radar metadata returned ${response.status}`);
+  return parseRadarFrames(await response.text());
+}
+
+export async function getRadarFrames(): Promise<RadarFrame[]> {
+  let frames = await fetchRadarCapabilities(false);
+  const latest = frames[frames.length - 1] ?? null;
+  const latestAgeMinutes = latest ? (Date.now() - Date.parse(latest.observedAt)) / 60_000 : Infinity;
+
+  // Next's data cache can occasionally hold an old NOAA capabilities document
+  // after the live WMS has already advanced. Retry uncached before declaring
+  // radar analysis stale so threat assessment follows the actual live feed.
+  if (latestAgeMinutes > 10) {
+    try {
+      const fresh = await fetchRadarCapabilities(true);
+      const freshLatest = fresh[fresh.length - 1] ?? null;
+      if (freshLatest && (!latest || freshLatest.epochSeconds > latest.epochSeconds)) {
+        frames = fresh;
+      }
+    } catch {
+      // Keep the cached frame list; callers can still decide whether it is stale.
+    }
+  }
+  return frames;
 }
 
 export function radarWmsUrl() { return NOAA_RADAR_WMS; }
