@@ -67,8 +67,7 @@ export async function GET(request: Request) {
   }).toString();
 
   try {
-    const requestedAgeMinutes = (Date.now() - Date.parse(time)) / 60_000;
-    const noaa = live && requestedAgeMinutes > 10 ? null : await fetchImage(noaaUrl, 60);
+    const noaa = live ? null : await fetchImage(noaaUrl, 60);
     if (noaa) {
       return new Response(noaa.body, {
         headers: {
@@ -79,9 +78,11 @@ export async function GET(request: Request) {
       });
     }
 
-    // NOAA's GeoServer occasionally returns 5xx while its timestamp feed is
-    // still healthy. Fall back to IEM's live nationwide NEXRAD mosaic so the
-    // Live tab remains useful without changing the rest of the app.
+    // Current Radar always uses IEM N0Q. NOAA's WMS can return a valid but
+    // transparent image for a fresh timestamp even while its metadata and point
+    // analysis are healthy. Using IEM for the live frame keeps the visible radar
+    // independent from NOAA's image-rendering quirks. Historical/scrubbed frames
+    // still try NOAA first and fall back here only when needed.
     const iemUrl = new URL(IEM_RADAR_WMS);
     iemUrl.search = new URLSearchParams({
       service: "WMS",
@@ -105,7 +106,7 @@ export async function GET(request: Request) {
       headers: {
         "Content-Type": iem.contentType,
         "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
-        "X-Radar-Source": "IEM-NEXRAD-N0Q-FALLBACK",
+        "X-Radar-Source": live ? "IEM-NEXRAD-N0Q-LIVE" : "IEM-NEXRAD-N0Q-FALLBACK",
       },
     });
   } catch {
