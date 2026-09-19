@@ -119,7 +119,7 @@ function approximateDbzFromPixel(r: number, g: number, b: number, a: number): nu
   return 5;
 }
 
-async function getIemRadarPointReflectivity(lat: number, lon: number, isoTime: string): Promise<number | null> {
+export async function getIemRadarPointReflectivity(lat: number, lon: number, isoTime: string): Promise<number | null> {
   const center = toMercator(lat, lon);
   const halfSizeMeters = 1200;
   const size = 7;
