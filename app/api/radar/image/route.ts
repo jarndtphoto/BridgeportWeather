@@ -24,6 +24,13 @@ function iemTime(isoTime: string) {
   return date.toISOString();
 }
 
+function freshestIemTime() {
+  // Stay one 5-minute bucket behind wall-clock time so the mosaic is very
+  // likely to be published while still being near-real-time.
+  const target = Date.now() - 5 * 60_000;
+  return new Date(Math.floor(target / (5 * 60_000)) * (5 * 60_000)).toISOString();
+}
+
 async function fetchImage(url: URL, revalidate: number) {
   const response = await fetch(url, { next: { revalidate } });
   const contentType = response.headers.get("content-type") ?? "";
@@ -38,6 +45,7 @@ export async function GET(request: Request) {
   const height = validSize(params.get("height") ?? params.get("HEIGHT"));
   const rawTime = params.get("time") ?? params.get("TIME");
   const time = rawTime && Number.isFinite(Date.parse(rawTime)) ? new Date(rawTime).toISOString() : null;
+  const live = params.get("live") === "1";
   if (!bbox || !width || !height || !time) {
     return Response.json({ error: "Invalid radar image request." }, { status: 400 });
   }
@@ -59,7 +67,8 @@ export async function GET(request: Request) {
   }).toString();
 
   try {
-    const noaa = await fetchImage(noaaUrl, 60);
+    const requestedAgeMinutes = (Date.now() - Date.parse(time)) / 60_000;
+    const noaa = live && requestedAgeMinutes > 10 ? null : await fetchImage(noaaUrl, 60);
     if (noaa) {
       return new Response(noaa.body, {
         headers: {
@@ -86,7 +95,7 @@ export async function GET(request: Request) {
       bbox,
       width,
       height,
-      time: iemTime(time),
+      time: live ? freshestIemTime() : iemTime(time),
     }).toString();
 
     const iem = await fetchImage(iemUrl, 60);
