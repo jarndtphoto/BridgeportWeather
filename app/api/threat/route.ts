@@ -3,7 +3,7 @@ import { getRadarFrames, getRadarPointReflectivity, radarWmsUrl, RADAR_LAYER } f
 import { getNwsAlerts } from "../../../lib/nws";
 import { getProbSevereNear } from "../../../lib/probsevere";
 import { assessThreat } from "../../../lib/threat";
-import { assessStormEvolution } from "../../../lib/evolution";
+import { assessStormEvolution, type StormEvolution } from "../../../lib/evolution";
 import { recordPressure } from "../../../lib/trend";
 import { getLocalForecast } from "../../../lib/forecast";
 import { getHrrrModelInitUtc, getHrrrPointSample, hrrrForecastMinutesForTime } from "../../../lib/hrrr";
@@ -58,7 +58,38 @@ export async function GET() {
   const [rawRadarSample, radarEchoVisible] = latestFrame ? await Promise.all([getRadarPointReflectivity(BRIDGEPORT_LAT, BRIDGEPORT_LON, latestFrame.observedAt), visibleRadarEchoAtBridgeport(latestFrame.observedAt)]) : [null, null];
   // The WMS feature-info value can be a palette/gray index rather than physical dBZ. Only treat it as a local radar signal when the rendered MRMS image actually shows an echo over Bridgeport.
   const radarDbz = radarEchoVisible === false ? null : rawRadarSample;
-  const evolution = await assessStormEvolution(BRIDGEPORT_LAT, BRIDGEPORT_LON, frames, radarDbz, hourlyRainIn, forecastDry);
+
+  // NOAA's point-sampling service can fail independently of the live image
+  // service. When both local point checks are unavailable, do not launch the
+  // dozens of additional point requests used by storm-evolution analysis.
+  // Return a fast, explicit degraded state so the Home banner never hangs.
+  let evolution: StormEvolution;
+  const radarPointServiceUnavailable = latestFrame !== null && rawRadarSample === null && radarEchoVisible === null;
+  if (radarPointServiceUnavailable) {
+    evolution = {
+      trend: "unknown",
+      motion: "unknown",
+      relevance: "unknown",
+      headline: "Radar analysis temporarily unavailable",
+      detail: "Live radar imagery is still available, but the detailed NOAA radar-analysis service is temporarily unavailable.",
+      strongestSector: null,
+      strongestNearbyDbz: null,
+      strongestRadiusMiles: null,
+      bridgeportDbz: null,
+      previousBridgeportDbz: null,
+      sampledRadiusMiles: 12,
+      comparisonMinutes: null,
+      estimatedArrivalMinutes: null,
+      estimatedArrivalWindowMinutes: null,
+      closestApproachMiles: null,
+      windAssist: false,
+      surfaceWindMph: null,
+      surfaceWindFromDeg: null,
+    };
+  } else {
+    evolution = await assessStormEvolution(BRIDGEPORT_LAT, BRIDGEPORT_LON, frames, radarDbz, hourlyRainIn, forecastDry);
+  }
+
   const assessment = assessThreat({ windGustMph, hourlyRainIn, radarDbz, strongestNearbyDbz: evolution.strongestNearbyDbz, stormTrend: evolution.trend, stormMotion: evolution.motion, pressureTrendInHgPerHr, alertsHere: alerts.here, alertsNearby: alerts.nearby, probSevereStorm: probSevere.storm });
   return Response.json({ assessment, evolution, probSevere, forecast: { nearTermDry: forecastDry }, inputs: { windGustMph, hourlyRainIn, radarDbz, radarEchoVisible, strongestNearbyDbz: evolution.strongestNearbyDbz, stormTrend: evolution.trend, stormMotion: evolution.motion, pressureTrendInHgPerHr, stationOnline: snapshot !== null, radarFrameTime: latestFrame?.observedAt ?? null, alertCountHere: alerts.here.length, alertCountNearby: alerts.nearby.length } }, { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" } });
 }
