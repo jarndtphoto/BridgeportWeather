@@ -205,6 +205,7 @@ export default function RadarMap() {
         height: String(height),
         time: frame.observedAt,
       });
+      if (followingLiveRef.current && frameIndex === frames.length - 1) params.set("live", "1");
       url = `/api/radar/image?${params.toString()}`;
       opacity = 0.58;
     }
@@ -251,6 +252,11 @@ export default function RadarMap() {
 
   const currentFrame = frames[frameIndex];
   const isNewest = frameIndex === frames.length - 1;
+  const latestFrameAgeMinutes = currentFrame ? (Date.now() - Date.parse(currentFrame.observedAt)) / 60_000 : 0;
+  const usingFreshFallbackTime = liveLayer === "precipitation" && followingLiveRef.current && isNewest && latestFrameAgeMinutes > 10;
+  const fallbackDisplayTime = usingFreshFallbackTime
+    ? new Date(Math.floor((Date.now() - 5 * 60_000) / (5 * 60_000)) * (5 * 60_000)).toISOString()
+    : currentFrame?.observedAt;
   const setLayer = (layer: LiveLayer) => {
     followingLiveRef.current = true;
     setPlaying(false);
@@ -283,7 +289,7 @@ export default function RadarMap() {
         <div ref={containerRef} className={`radarMap ${touchMap ? (mapInteraction ? "mapTouchActive" : "mapTouchScroll") : ""}`} aria-label={`Interactive ${liveLayer === "precipitation" ? "NOAA precipitation radar" : "GOES-East infrared cloud"} map centered on Bridgeport, Chicago`} />
         {touchMap && <button type="button" className="mapInteractionButton" onClick={toggleMapInteraction}>{mapInteraction ? "Done" : "Move map"}</button>}
         <div className="radarReadout" aria-live="polite">
-          {liveLayer === "precipitation" ? <><strong>{frameLabel(currentFrame?.observedAt)}</strong><span>{isNewest ? "Newest observation" : `${Math.max(0, frames.length - 1 - frameIndex)} frames before newest`}</span></> : <><strong>Current cloud cover</strong><span>GOES-East infrared · day/night</span></>}
+          {liveLayer === "precipitation" ? <><strong>{frameLabel(fallbackDisplayTime)}</strong><span>{usingFreshFallbackTime ? "Live NEXRAD fallback" : isNewest ? "Newest observation" : `${Math.max(0, frames.length - 1 - frameIndex)} frames before newest`}</span></> : <><strong>Current cloud cover</strong><span>GOES-East infrared · day/night</span></>}
         </div>
       </div>
       {liveLayer === "precipitation" ? (
