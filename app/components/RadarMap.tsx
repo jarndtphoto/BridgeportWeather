@@ -237,7 +237,10 @@ export default function RadarMap() {
     return () => {
       next.off("load", promote);
       next.off("error", discard);
-      if (removalTimer !== null) window.clearTimeout(removalTimer);
+      if (removalTimer !== null) {
+        window.clearTimeout(removalTimer);
+        if (previous && previous !== next && map.hasLayer(previous)) map.removeLayer(previous);
+      }
       if (token !== renderTokenRef.current && radarLayerRef.current !== next && map.hasLayer(next)) map.removeLayer(next);
     };
   }, [frames, frameIndex, liveLayer, mapReady, viewRevision, cloudRevision]);
@@ -257,8 +260,12 @@ export default function RadarMap() {
     : currentFrame?.observedAt;
   const setLayer = (layer: LiveLayer) => {
     const map = mapRef.current;
-    const existing = radarLayerRef.current;
-    if (map && existing && map.hasLayer(existing)) map.removeLayer(existing);
+    if (map) {
+      map.eachLayer((candidate) => {
+        const pane = (candidate as { options?: { pane?: string } }).options?.pane;
+        if (pane === "weather" && map.hasLayer(candidate)) map.removeLayer(candidate);
+      });
+    }
     radarLayerRef.current = null;
     followingLiveRef.current = true;
     setPlaying(false);
